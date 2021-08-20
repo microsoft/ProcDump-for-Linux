@@ -19,14 +19,12 @@
 #include <stdarg.h>
 #include <time.h>
 
-#define INTERNAL_ERROR "Internal Error has occurred. If problem continues to occur run procudmp with -d flag to trace issue"
+#define INTERNAL_ERROR "Internal Error has occurred. If problem continues to occur run procdump with -d flag to trace issue"
 
 // double-macro-stringify to expand __FILE__ and __LINE__ properly when they are injected in files
 #define S1(x) #x
 #define S2(x) S1(x)
 #define LOCATION "in "__FILE__ ", at line " S2(__LINE__)
-
-
 
 enum LogLevel{
     debug,

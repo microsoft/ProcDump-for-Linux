@@ -19,6 +19,7 @@
 #include <memory.h>
 #include <zconf.h>
 #include <sys/sysinfo.h>
+#include <sys/ptrace.h>
 #include <unistd.h>
 
 #include "CoreDumpWriter.h"
@@ -32,6 +33,7 @@ void *CommitMonitoringThread(void *thread_args /* struct ProcDumpConfiguration* 
 void *CpuMonitoringThread(void *thread_args /* struct ProcDumpConfiguration* */);
 void *ThreadCountMonitoringThread(void *thread_args /* struct ProcDumpConfiguration* */);
 void *FileDescriptorCountMonitoringThread(void *thread_args /* struct ProcDumpConfiguration* */);
+void *SignalMonitoringThread(void *thread_args /* struct ProcDumpConfiguration* */);
 void *TimerThread(void *thread_args /* struct ProcDumpConfiguration* */);
 
 #endif // TRIGGER_THREAD_PROCS_H

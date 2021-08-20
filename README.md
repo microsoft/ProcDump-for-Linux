@@ -48,6 +48,7 @@ Usage: procdump [OPTIONS...] TARGET
       -m          Trigger core dump generation when when memory commit is less than specified value (MB)
       -T          Trigger when thread count exceeds or equals specified value.
       -F          Trigger when file descriptor count exceeds or equals specified value.
+      -G          Trigger when signal with the specified value (numeric) is sent (uses PTRACE and will affect performance of target process).      
       -I          Polling frequency in milliseconds (default is 1000)
       -n          Number of core dumps to write before exiting (default is 1)
       -s          Consecutive seconds before dump is written (default is 10)
@@ -96,7 +97,10 @@ The following will create a core dump in the current directory with the name dum
 ```
 sudo procdump -o dump -p 1234
 ```
-
+The following will create a core dump when a SIGSEGV occurs.
+```
+sudo procdump -G 11 -p 1234
+```
 > All options can also be used with -w instead of -p. -w will wait for a process with the given name.
 
 The following waits for a process named `my_application` and creates a core dump immediately when it is found.

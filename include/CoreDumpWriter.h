@@ -59,6 +59,7 @@ enum ECoreDumpType {
     CPU,                    // trigger on CPU threshold
     THREAD,                 // trigger on thread count
     FILEDESC,               // trigger on file descriptor count
+    SIGNAL,                 // trigger on signal
     TIME,                   // trigger on time interval
     MANUAL                  // manual trigger
 };
