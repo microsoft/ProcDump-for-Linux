@@ -142,7 +142,7 @@ static int bcc_elf_file_open(const char *path, struct bcc_elf_file *out) {
   struct bcc_zip_entry entry;
   int fd = -1;
 
-  fd = syscall(SYS_open, path, O_RDONLY, 0);
+  fd = syscall(SYS_openat, path, O_RDONLY, 0);
   if (fd >= 0) {
     if (bcc_elf_file_open_fd(fd, out)) {
       close(fd);
@@ -601,7 +601,7 @@ static int verify_checksum(const char *file, unsigned int crc) {
   unsigned int actual;
 
 
-  fd = syscall(SYS_open, file, O_RDONLY, 0);
+  fd = syscall(SYS_openat, file, O_RDONLY, 0);
   if (fd < 0)
     return 0;
 

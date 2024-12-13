@@ -93,7 +93,7 @@ bool ProcStat::refresh_root() {
   // re-open root note: when /proc/.../root changes, the open file descriptor
   // still refers to the old one
   int original_root_fd = root_fd_;
-  int root_fd_ = syscall(SYS_open, root_symlink_.c_str(), O_PATH);
+  int root_fd_ = syscall(SYS_openat, root_symlink_.c_str(), O_PATH);
   if (root_fd_ == -1)
     std::cerr << "Opening " << root_symlink_ << " failed: " << strerror(errno)
               << std::endl;

@@ -403,7 +403,7 @@ static int load_ld_cache(const char *cache_path) {
   size_t ld_size;
   const char *ld_map;
 
-  int ret, fd = syscall(SYS_open, cache_path, O_RDONLY, 0);
+  int ret, fd = syscall(SYS_openat, cache_path, O_RDONLY, 0);
   if (fd <= 0)
   {
       return -1;

@@ -225,6 +225,13 @@ target_include_directories(procdump PUBLIC
                            ${sym_SOURCE_DIR}
                            ${procdump_ebpf_SOURCE_DIR}
                           )
+
+if(NOT APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+  target_include_directories(procdump PUBLIC
+                             /usr/include/aarch64-linux-gnu
+                            )
+endif()
+
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   add_dependencies(procdump libbpf procdump_ebpf)
   target_link_libraries(procdump ${libbpf_SOURCE_DIR}/src/libbpf.a elf z pthread)
@@ -306,9 +313,17 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
                     )
   set(CLANG_DEFINES -D __KERNEL__
                     -D __BPF_TRACING__
-                    -D __TARGET_ARCH_x86
                     -D __linux__
                     )
+
+  if(NOT APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+    list(APPEND CLANG_DEFINES -D __TARGET_ARCH_arm64)
+  endif()
+
+  if(NOT APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    list(APPEND CLANG_DEFINES -D __TARGET_ARCH_x86)
+  endif()
+
   if (DEBUG_K)
       message("Using DEBUG_K Option...")
       list(APPEND CLANG_DEFINES -DDEBUG_K)
@@ -316,11 +331,19 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
 
   set(CLANG_INCLUDES
                     -I "/usr/include"
-                    -I "/usr/include/x86_64-linux-gnu"
+                    #-I "/usr/include/x86_64-linux-gnu"
                     -I "${CMAKE_SOURCE_DIR}"
                     -I "${CMAKE_BINARY_DIR}"
                     -I "${libbpf_SOURCE_DIR}/src"
                     )
+
+  if(NOT APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+  list(APPEND CLANG_INCLUDES -I "/usr/include/aarch64-linux-gnu")
+  endif()
+
+  if(NOT APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    list(APPEND CLANG_INCLUDES -I "/usr/include/x86_64-linux-gnu")
+  endif()
 
   add_custom_target(procdump_ebpf
                     DEPENDS procdump_ebpf.o

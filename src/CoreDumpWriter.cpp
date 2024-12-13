@@ -161,9 +161,9 @@ char* WriteCoreDump(struct CoreDumpWriter *self)
         case WAIT_OBJECT_0+1: // We got a dump slot!
             {
                 char* socketName = NULL;
-#ifdef __linux__                
+#ifdef __linux__
                 IsCoreClrProcess(self->Config->ProcessId, &socketName);
-#endif                
+#endif
                 unsigned int currentCoreDumpFilter = -1;
                 if(self->Config->CoreDumpMask != -1)
                 {
@@ -237,7 +237,12 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
     gcorePrefixName = GetCoreDumpPrefixName(self->Config->ProcessId, name, self->Config->CoreDumpPath, self->Config->CoreDumpName, self->Type);
 
     // assemble filename
-    if(snprintf(coreDumpFileName, PATH_MAX, "%s.%d", gcorePrefixName, pid) < 0)
+    // On Linux, gcore appends .<pid> to the outputfile but on macOS it doesn't
+#ifdef __linux__
+    if(snprintf(coreDumpFileName, PATH_MAX, "%s", gcorePrefixName) < 0)
+#else
+     if(snprintf(coreDumpFileName, PATH_MAX, "%s.%d", gcorePrefixName, pid) < 0)
+#endif
     {
         Log(error, INTERNAL_ERROR);
         Trace("WriteCoreDumpInternal: failed sprintf core file name");
@@ -283,7 +288,7 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
 
             self->Config->NumberOfDumpsCollected++; // safe to increment in crit section
         }
-#endif        
+#endif
     }
     else
     {
@@ -335,7 +340,7 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
         // close pipe reading from gcore
         self->Config->gcorePid = NO_PID;                // reset gcore pid so that signal handler knows we aren't dumping
         int pcloseStatus = 0;
-#ifdef __linux__        
+#ifdef __linux__
         pcloseStatus = pclose(commandPipe);
 #endif
 
@@ -349,7 +354,7 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
                 gcoreFailedMsg = true;
             }
         }
-        
+
         if(gcoreStatus != 0 || pcloseStatus != 0 || (gcoreFailedMsg == true))
         {
             Log(error, "An error occurred while generating the core dump:");
@@ -374,6 +379,10 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
             // On WSL2 there is a delay between the core dump being written to disk and able to succesfully access it in the below check
             sleep(1);
             // validate that core dump file was generated
+#ifdef __linux__
+            // If we are on Linux we add back the .pid since gcore adds it to the filename
+            snprintf(coreDumpFileName, PATH_MAX, "%s.%d", gcorePrefixName, pid);
+#endif
             if(access(coreDumpFileName, F_OK) != -1)
             {
                 if(self->Config->nQuit)
@@ -409,7 +418,7 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
 
 
     free(name);
-    
+
     return strdup(coreDumpFileName);
 }
 

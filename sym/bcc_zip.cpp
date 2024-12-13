@@ -214,7 +214,7 @@ static int find_central_directory(struct bcc_zip_archive* archive) {
 }
 
 struct bcc_zip_archive* bcc_zip_archive_open(const char* path) {
-  int fd = syscall(SYS_open, path, O_RDONLY, 0);
+  int fd = syscall(SYS_openat, path, O_RDONLY, 0);
   if (fd < 0) {
     return NULL;
   }
