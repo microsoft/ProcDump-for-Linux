@@ -224,7 +224,7 @@ else()
                 )
 endif()
 
-target_compile_options(procdump PRIVATE -g -pthread -fstack-protector-all -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -Werror -D_GNU_SOURCE -std=c++11 -O2)
+target_compile_options(procdump PRIVATE -g -pthread -fstack-protector-all -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -Werror -D_GNU_SOURCE -std=c++11 -Wno-vla -O2)
 
 target_include_directories(procdump PUBLIC
                            ${procdump_INC}
