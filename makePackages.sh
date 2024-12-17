@@ -25,7 +25,7 @@
 #################################################################################
 
 if [ "$5" = "" ]; then
-    echo "Usage: $0 <SourceDir> <BinaryDir> <package name> <package version> <package release> <PackageType>"
+    echo "Usage: $0 <SourceDir> <BinaryDir> <package name> <package version> <package release> <PackageType> <architecture>"
     exit 1
 fi
 
@@ -36,8 +36,9 @@ PACKAGE_NAME=$3
 PACKAGE_VER=$4
 PACKAGE_REL=$5
 PACKAGE_TYPE=$6
+ARCHITECTURE = $7
 
-DEB_PACKAGE_NAME="${PACKAGE_NAME}_${PACKAGE_VER}_amd64"
+DEB_PACKAGE_NAME="${PACKAGE_NAME}_${PACKAGE_VER}_${ARCHITECTURE}"
 RPM_PACKAGE_NAME="${PACKAGE_NAME}-${PACKAGE_VER}-${PACKAGE_REL}"
 BREW_PACKAGE_NAME="${PACKAGE_NAME}-mac-${PACKAGE_VER}"
 
@@ -91,7 +92,7 @@ if [ "$PACKAGE_TYPE" = "rpm" ]; then
         cd "${PROJECT_BINARY_DIR}/rpm/${RPM_PACKAGE_NAME}"
         "$RPMBUILD" --define "_topdir `pwd`" -v -bb "SPECS/${RPM_PACKAGE_NAME}.spec"
         RET=$?
-        cp RPMS/x86_64/*.rpm ..
+        cp RPMS/$(uname -m)/*.rpm ..
     else
         echo "No rpmbuild found"
         RET=1
