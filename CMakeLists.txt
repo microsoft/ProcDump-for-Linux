@@ -156,6 +156,12 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
                             /usr/include
                             )
 
+  if(NOT APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+    target_include_directories(ProcDumpProfiler PUBLIC
+                               /usr/include/aarch64-linux-gnu
+                              )
+  endif()
+
   add_custom_command(OUTPUT ProcDumpProfiler.o
                     COMMAND "${LD}" -r -b binary -o "${PROJECT_BINARY_DIR}/ProcDumpProfiler.o" ProcDumpProfiler.so
                     COMMENT "Packing ProcDumpProfiler.so into ProcDumpProfiler.o"
