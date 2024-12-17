@@ -233,6 +233,7 @@ target_include_directories(procdump PUBLIC
                           )
 
 if(NOT APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+  message(STATUS "Adding include path for aarch64: /usr/include/aarch64-linux-gnu")
   target_include_directories(procdump PUBLIC
                              /usr/include/aarch64-linux-gnu
                             )
