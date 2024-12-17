@@ -96,15 +96,6 @@ set(procdump_ebpf_SOURCE_DIR ${CMAKE_SOURCE_DIR}/ebpf)
 set(sym_SOURCE_DIR ${CMAKE_SOURCE_DIR}/sym)
 
 #
-# Configure files
-#
-configure_file(${procdump_INC}/ProcDumpVersion.h.in ${PROJECT_BINARY_DIR}/ProcDumpVersion.h)
-if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
-  configure_file(dist/DEBIAN.in/control.in DEBIANcontrol)
-  configure_file(dist/SPECS.in/spec.in SPECS.spec)
-endif()
-
-#
 # Compiler
 #
 set(CMAKE_CXX_COMPILER "clang++")
@@ -117,6 +108,7 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   # Figure out which architecture we are building for
   if(CMAKE_SYSTEM_PROCESSOR STREQUAL x86_64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL amd64)
     set(CLRHOSTDEF -DHOST_AMD64 -DHOST_64BIT)
+    set(ARCHITECTURE "amd64")
   elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL x86 OR CMAKE_SYSTEM_PROCESSOR STREQUAL i686)
     set(CLRHOSTDEF -DHOST_X86)
   elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL armv6 OR CMAKE_SYSTEM_PROCESSOR STREQUAL armv6l)
@@ -125,6 +117,7 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
     set(CLRHOSTDEF -DHOST_ARM)
   elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL aarch64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL arm64)
     set(CLRHOSTDEF -DHOST_ARM64 -DHOST_64BIT)
+    set(ARCHITECTURE "arm64")
   elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL loongarch64)
     set(CLRHOSTDEF -DHOST_LOONGARCH64 -DHOST_64BIT)
   elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL riscv64)
@@ -167,6 +160,15 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
                     COMMENT "Packing ProcDumpProfiler.so into ProcDumpProfiler.o"
                     DEPENDS ProcDumpProfiler
                     )
+endif()
+
+#
+# Configure files
+#
+configure_file(${procdump_INC}/ProcDumpVersion.h.in ${PROJECT_BINARY_DIR}/ProcDumpVersion.h)
+if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+  configure_file(dist/DEBIAN.in/control.in DEBIANcontrol)
+  configure_file(dist/SPECS.in/spec.in SPECS.spec)
 endif()
 
 #

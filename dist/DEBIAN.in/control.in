@@ -1,6 +1,6 @@
 Package: procdump
 Version: @PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@.@PROJECT_VERSION_PATCH@
-Architecture: amd64
+Architecture: @ARCHITECTURE@
 Maintainer: Sysinternals <syssite@microsoft.com>
 Description: Sysinternals process dump utility
  ProcDump is a command-line utility whose primary purpose is monitoring an application
