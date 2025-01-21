@@ -1,6 +1,7 @@
 #!/bin/bash
 
 echo "You can optionally specify a specific test script to run rather than running all (default)"
+echo "NOTE: If you manually install .NET, this script assumes the installation directory is /usr/share/dotnet"
 
 failed=0
 failedTests="\n"
@@ -27,10 +28,11 @@ if [ "$OS" != "Darwin" ]; then
     exit 1
     fi
 fi
+# NOTE: If you manually install .NET, this script assumes the installation directory is /usr/share/dotnet"
+DOTNET_PATH=$(which dotnet)
 
-if [ ! -e /usr/bin/dotnet ] && [ "$OS" != "Darwin" ]; then
-   echo "Please install .NET before running this script!"
-   exit 1
+if [ -z "$DOTNET_PATH" ] && [ "$OS" != "Darwin" ]; then
+    export PATH=$PATH:/usr/share/dotnet
 fi
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )";
@@ -53,7 +55,7 @@ function runTest {
 scenarioDir=""
 if [ "$OS" = "Darwin" ]; then
     scenarioDir=$DIR/scenarios_mac
-else    
+else
     scenarioDir=$DIR/scenarios
 fi
 
