@@ -16,145 +16,139 @@ resources:
       type: git
       name: OneBranch.Pipelines/GovernedTemplates
       ref: refs/heads/main
-    - repository: ProcDump
-      type: github
-      endpoint: sysinternals
-      name: Microsoft/ProcDump-for-Linux
 extends:
   template: v2/OneBranch.NonOfficial.CrossPlat.yml@obtemplates
   parameters:
-    featureFlags:
     globalSdl:
       tsa:
         enabled: false
       policheck:
         break: true
     stages:
-    - stage: "Build_Run_Tests"
-      jobs:
-      - job: "ProcDump_Build_ARM64_Run_Tests"
-        pool:
-          type: linux
-          hostArchitecture: arm64
-        variables:
-          LinuxContainerImage: 'mcr.microsoft.com/mirror/docker/library/ubuntu:20.04'
-          ob_outputDirectory: '$(Build.SourcesDirectory)\out'
-        steps:
-        - script: |
-            apt install rsyslog
-            rm -f /run/rsyslogd.pid
-            service rsyslog start || true
-          displayName: 'Enable syslog'
+      - stage: "Build_Run_Tests"
+        jobs:
+        - job: "ProcDump_Build_ARM64_Run_Tests"
+          pool:
+            type: linux
+            hostArchitecture: arm64
+          variables:
+            LinuxContainerImage: 'mcr.microsoft.com/mirror/docker/library/ubuntu:20.04'
+            ob_outputDirectory: '$(Build.SourcesDirectory)\out'
+          steps:
+          - script: |
+              apt install rsyslog
+              rm -f /run/rsyslogd.pid
+              service rsyslog start || true
+            displayName: 'Enable syslog'
 
-        - script: |
-            chmod +x .devcontainer/install-ubuntu-dependencies.sh
-            .devcontainer/install-ubuntu-dependencies.sh
-          displayName: "Install pre-reqs for Ubuntu"
+          - script: |
+              chmod +x .devcontainer/install-ubuntu-dependencies.sh
+              .devcontainer/install-ubuntu-dependencies.sh
+            displayName: "Install pre-reqs for Ubuntu"
 
-        - script: |
-            clang --version
-            clang++ --version
-            gcc --version
-          displayName: 'List compiler versions'
+          - script: |
+              clang --version
+              clang++ --version
+              gcc --version
+            displayName: 'List compiler versions'
 
-        - template: templates/build.yaml@ProcDump
+          - template: templates/build.yaml
 
-        - script: |
-            cd procdump_build/tests/integration
-            sudo ./run.sh
-          displayName: 'Run unit tests'
+          - script: |
+              cd procdump_build/tests/integration
+              sudo ./run.sh
+            displayName: 'Run unit tests'
 
-        - script: |
-            mkdir $(Build.ArtifactStagingDirectory)/logs
-            cp /var/log/syslog $(Build.ArtifactStagingDirectory)/logs
-            cp /var/tmp/procdumpprofiler.log $(Build.ArtifactStagingDirectory)/logs
-          displayName: 'Copy log artifacts to staging'
-          condition: always()
+          - script: |
+              mkdir $(Build.ArtifactStagingDirectory)/logs
+              cp /var/log/syslog $(Build.ArtifactStagingDirectory)/logs
+              cp /var/tmp/procdumpprofiler.log $(Build.ArtifactStagingDirectory)/logs
+            displayName: 'Copy log artifacts to staging'
+            condition: always()
 
-        - task: PublishBuildArtifacts@1
-          condition: always()
-          inputs:
-            PathtoPublish: '$(Build.ArtifactStagingDirectory)/logs/syslog'
-            ArtifactName: 'syslog'
-            publishLocation: 'Container'
+          - task: PublishBuildArtifacts@1
+            condition: always()
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)/logs/syslog'
+              ArtifactName: 'syslog'
+              publishLocation: 'Container'
 
-        - task: PublishBuildArtifacts@1
-          condition: always()
-          inputs:
-            PathtoPublish: '$(Build.ArtifactStagingDirectory)/logs/procdumpprofiler.log'
-            ArtifactName: 'procdumpprofiler_arm64.log'
-            publishLocation: 'Container'
+          - task: PublishBuildArtifacts@1
+            condition: always()
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)/logs/procdumpprofiler.log'
+              ArtifactName: 'procdumpprofiler_arm64.log'
+              publishLocation: 'Container'
 
+        - job: "ProcDump_Build_AMD64_Run_Tests"
+          pool:
+            type: linux
+          variables:
+            LinuxContainerImage: 'mcr.microsoft.com/mirror/docker/library/ubuntu:20.04'
+            ob_outputDirectory: '$(Build.SourcesDirectory)\out'
+          steps:
+          - script: |
+              apt install rsyslog
+              rm -f /run/rsyslogd.pid
+              service rsyslog start || true
+            displayName: 'Enable syslog'
 
-      - job: "ProcDump_Build_AMD64_Run_Tests"
-        pool:
-          type: linux
-        variables:
-          LinuxContainerImage: 'mcr.microsoft.com/mirror/docker/library/ubuntu:20.04'
-          ob_outputDirectory: '$(Build.SourcesDirectory)\out'
-        steps:
-        - script: |
-            apt install rsyslog
-            rm -f /run/rsyslogd.pid
-            service rsyslog start || true
-          displayName: 'Enable syslog'
+          - script: |
+              chmod +x .devcontainer/install-ubuntu-dependencies.sh
+              .devcontainer/install-ubuntu-dependencies.sh
+            displayName: "Install pre-reqs for Ubuntu"
 
-        - script: |
-            chmod +x .devcontainer/install-ubuntu-dependencies.sh
-            .devcontainer/install-ubuntu-dependencies.sh
-          displayName: "Install pre-reqs for Ubuntu"
+          - script: |
+              clang --version
+              clang++ --version
+              gcc --version
+            displayName: 'List compiler versions'
 
-        - script: |
-            clang --version
-            clang++ --version
-            gcc --version
-          displayName: 'List compiler versions'
+          - template: templates/build.yaml
 
-        - template: templates/build.yaml
+          - script: |
+              cd procdump_build/tests/integration
+              sudo ./run.sh
+            displayName: 'Run unit tests'
 
-        - script: |
-            cd procdump_build/tests/integration
-            sudo ./run.sh
-          displayName: 'Run unit tests'
+          - script: |
+              mkdir $(Build.ArtifactStagingDirectory)/logs
+              cp /var/log/syslog $(Build.ArtifactStagingDirectory)/logs
+              cp /var/tmp/procdumpprofiler.log $(Build.ArtifactStagingDirectory)/logs
+            displayName: 'Copy log artifacts to staging'
+            condition: always()
 
-        - script: |
-            mkdir $(Build.ArtifactStagingDirectory)/logs
-            cp /var/log/syslog $(Build.ArtifactStagingDirectory)/logs
-            cp /var/tmp/procdumpprofiler.log $(Build.ArtifactStagingDirectory)/logs
-          displayName: 'Copy log artifacts to staging'
-          condition: always()
+          - task: PublishBuildArtifacts@1
+            condition: always()
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)/logs/syslog'
+              ArtifactName: 'syslog'
+              publishLocation: 'Container'
 
-        - task: PublishBuildArtifacts@1
-          condition: always()
-          inputs:
-            PathtoPublish: '$(Build.ArtifactStagingDirectory)/logs/syslog'
-            ArtifactName: 'syslog'
-            publishLocation: 'Container'
+          - task: PublishBuildArtifacts@1
+            condition: always()
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)/logs/procdumpprofiler.log'
+              ArtifactName: 'procdumpprofiler_amd64.log'
+              publishLocation: 'Container'
 
-        - task: PublishBuildArtifacts@1
-          condition: always()
-          inputs:
-            PathtoPublish: '$(Build.ArtifactStagingDirectory)/logs/procdumpprofiler.log'
-            ArtifactName: 'procdumpprofiler_amd64.log'
-            publishLocation: 'Container'
+        - job: "ProcDump_Build_MACOS_Run_Tests"
+          pool:
+            type: linux
+            isCustom: true
+            name: Azure Pipelines
+            vmImage: 'macOS-latest'
+          variables:
+            ob_outputDirectory: '$(Build.SourcesDirectory)/out'
+          steps:
 
-      - job: "ProcDump_Build_MACOS_Run_Tests"
-        pool:
-          type: linux
-          isCustom: true
-          name: Azure Pipelines
-          vmImage: 'macOS-latest'
-        variables:
-          ob_outputDirectory: '$(Build.SourcesDirectory)/out'
-        steps:
+          - script: |
+              sw_vers
+            displayName: 'Diagnostics'
 
-        - script: |
-            sw_vers
-          displayName: 'Diagnostics'
+          - template: templates/build.yaml
 
-        - template: templates/build.yaml
-
-        - script: |
-            cd procdump_build/tests/integration
-            sudo ./run.sh
-          displayName: 'Run unit tests'
+          - script: |
+              cd procdump_build/tests/integration
+              sudo ./run.sh
+            displayName: 'Run unit tests'
