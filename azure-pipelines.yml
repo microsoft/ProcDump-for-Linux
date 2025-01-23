@@ -52,7 +52,7 @@ extends:
               gcc --version
             displayName: 'List compiler versions'
 
-          - template: templates/build.yaml
+          #- template: templates/build.yaml
 
           - script: |
               cd procdump_build/tests/integration
@@ -104,7 +104,7 @@ extends:
               gcc --version
             displayName: 'List compiler versions'
 
-          - template: templates/build.yaml
+          #- template: templates/build.yaml
 
           - script: |
               cd procdump_build/tests/integration
@@ -146,7 +146,7 @@ extends:
               sw_vers
             displayName: 'Diagnostics'
 
-          - template: templates/build.yaml
+          #- template: templates/build.yaml
 
           - script: |
               cd procdump_build/tests/integration
