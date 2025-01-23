@@ -58,6 +58,6 @@ else
     wget https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
     dpkg -i packages-microsoft-prod.deb
     rm packages-microsoft-prod.deb
-    apt -y update && apt-get install -y dotnet-runtime-6.0
-    apt-get install -y dotnet-sdk-6.0
+    apt -y update && apt-get install -y dotnet-runtime-8.0
+    apt-get install -y dotnet-sdk-8.0
 fi
