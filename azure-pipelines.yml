@@ -154,5 +154,5 @@ extends:
 
           - script: |
               cd procdump_build/tests/integration
-              ./run.sh
+              sudo ./run.sh
             displayName: 'Run unit tests'
