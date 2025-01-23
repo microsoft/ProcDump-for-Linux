@@ -40,7 +40,7 @@ extends:
             ob_outputDirectory: '$(Build.SourcesDirectory)\out'
           steps:
           - script: |
-              apt -y update && apt install rsyslog
+              apt -y update && apt install rsyslog -y
               rm -f /run/rsyslogd.pid
               service rsyslog start || true
             displayName: 'Enable syslog'
@@ -93,7 +93,7 @@ extends:
             ob_outputDirectory: '$(Build.SourcesDirectory)\out'
           steps:
           - script: |
-              apt -y update && apt install rsyslog
+              apt -y update && apt install rsyslog -y
               rm -f /run/rsyslogd.pid
               service rsyslog start || true
             displayName: 'Enable syslog'
