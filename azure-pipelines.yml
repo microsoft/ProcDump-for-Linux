@@ -40,13 +40,13 @@ extends:
             ob_outputDirectory: '$(Build.SourcesDirectory)\out'
           steps:
           - script: |
-              apt -y update && apt install rsyslog -y
+              DEBIAN_FRONTEND=noninteractive apt -y update && apt install rsyslog -y
               rm -f /run/rsyslogd.pid
               service rsyslog start || true
             displayName: 'Enable syslog'
 
           - script: |
-              apt -y update && apt install sudo -y
+              DEBIAN_FRONTEND=noninteractive apt -y update && apt install sudo -y
               chmod +x .devcontainer/install-ubuntu-dependencies.sh
               .devcontainer/install-ubuntu-dependencies.sh
             displayName: "Install pre-reqs for Ubuntu"
@@ -93,13 +93,13 @@ extends:
             ob_outputDirectory: '$(Build.SourcesDirectory)\out'
           steps:
           - script: |
-              apt -y update && apt install rsyslog -y
+              DEBIAN_FRONTEND=noninteractive apt -y update && apt install rsyslog -y
               rm -f /run/rsyslogd.pid
               service rsyslog start || true
             displayName: 'Enable syslog'
 
           - script: |
-              apt -y update && apt install sudo -y
+              DEBIAN_FRONTEND=noninteractive apt -y update && apt install sudo -y
               chmod +x .devcontainer/install-ubuntu-dependencies.sh
               .devcontainer/install-ubuntu-dependencies.sh
             displayName: "Install pre-reqs for Ubuntu"
