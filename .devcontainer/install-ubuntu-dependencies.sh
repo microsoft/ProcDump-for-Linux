@@ -1,18 +1,18 @@
 #!/bin/bash
-echo "APT::Get::Assume-Yes \"true\";" > sudo /etc/apt/apt.conf.d/90assumeyes
-DEBIAN_FRONTEND=noninteractive
-sudo apt-get update
-sudo apt -y install software-properties-common
-sudo add-apt-repository "deb http://security.ubuntu.com/ubuntu xenial-security main"
-sudo apt-get update
-sudo apt-get install -y --no-install-recommends \
+echo "APT::Get::Assume-Yes \"true\";" > /etc/apt/apt.conf.d/90assumeyes
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt -y install software-properties-common
+apt-get update
+apt upgrade -y \
+&& apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     jq \
     git \
     iputils-ping \
     libcurl4 \
-    libicu55 \
+    libicu66 \
     libunwind8 \
     netcat \
     gdb \
@@ -27,32 +27,37 @@ sudo apt-get install -y --no-install-recommends \
     pax \
     cmake \
     libelf-dev \
+    clang \
     clang-12 \
     llvm \
     build-essential \
     libbpf-dev
 
 # Set preference to clang-12
-yes '' | sudo update-alternatives --force --all
-sudo update-alternatives --remove-all clang
-sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-12 100
-sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-12 100
-sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-12 100
+update-alternatives --install /usr/bin/clang clang /usr/bin/clang-12 100
 
 # Build and install bpftool
-sudo rm -rf /usr/sbin/bpftool
+rm -rf /usr/sbin/bpftool
 git clone --recurse-submodules https://github.com/libbpf/bpftool.git
 cd bpftool/src
-sudo make install
-sudo ln -s /usr/local/sbin/bpftool /usr/sbin/bpftool
+make install
+ln -s /usr/local/sbin/bpftool /usr/sbin/bpftool
 
 # install debbuild
 wget https://github.com/debbuild/debbuild/releases/download/22.02.1/debbuild_22.02.1-0ubuntu20.04_all.deb \
-    && sudo dpkg -i debbuild_22.02.1-0ubuntu20.04_all.deb
+    && dpkg -i debbuild_22.02.1-0ubuntu20.04_all.deb
 
-# install .NET 6 for signing process and integration tests
-wget https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
-sudo dpkg -i packages-microsoft-prod.deb
-rm packages-microsoft-prod.deb
-sudo apt -y update && sudo apt-get install -y dotnet-runtime-6.0
-sudo apt-get install -y dotnet-sdk-6.0
+arch=$(uname -m)
+if [[ "$arch" == "aarch64" ]]; then
+    wget https://dot.net/v1/dotnet-install.sh
+    chmod +x dotnet-install.sh
+    ./dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet
+else
+    # Not ARM64, we can install dotnet the normal way.
+    # install .NET 6 for signing process and integration tests
+    wget https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
+    dpkg -i packages-microsoft-prod.deb
+    rm packages-microsoft-prod.deb
+    apt -y update && apt-get install -y dotnet-runtime-6.0
+    apt-get install -y dotnet-sdk-6.0
+fi
