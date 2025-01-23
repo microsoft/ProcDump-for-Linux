@@ -16,7 +16,10 @@ resources:
       type: git
       name: OneBranch.Pipelines/GovernedTemplates
       ref: refs/heads/main
-
+    - repository: ProcDump
+    type: github
+    endpoint: sysinternals
+    name: Microsoft/ProcDump-for-Linux
 extends:
   template: v2/OneBranch.NonOfficial.CrossPlat.yml@obtemplates
   parameters:
@@ -54,7 +57,7 @@ extends:
             gcc --version
           displayName: 'List compiler versions'
 
-        - template: templates/build.yaml
+        - template: templates/build.yaml@ProcDump
 
         - script: |
             cd procdump_build/tests/integration
