@@ -60,7 +60,7 @@ extends:
 
           - script: |
               cd procdump_build/tests/integration
-              sudo ./run.sh
+              ./run.sh
             displayName: 'Run unit tests'
 
           - script: |
@@ -112,7 +112,7 @@ extends:
 
           - script: |
               cd procdump_build/tests/integration
-              sudo ./run.sh
+              ./run.sh
             displayName: 'Run unit tests'
 
           - script: |
@@ -154,5 +154,5 @@ extends:
 
           - script: |
               cd procdump_build/tests/integration
-              sudo ./run.sh
+              ./run.sh
             displayName: 'Run unit tests'
