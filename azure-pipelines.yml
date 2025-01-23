@@ -46,6 +46,7 @@ extends:
             displayName: 'Enable syslog'
 
           - script: |
+              apt install sudo -y
               chmod +x .devcontainer/install-ubuntu-dependencies.sh
               .devcontainer/install-ubuntu-dependencies.sh
             displayName: "Install pre-reqs for Ubuntu"
@@ -98,6 +99,7 @@ extends:
             displayName: 'Enable syslog'
 
           - script: |
+              apt install sudo -y
               chmod +x .devcontainer/install-ubuntu-dependencies.sh
               .devcontainer/install-ubuntu-dependencies.sh
             displayName: "Install pre-reqs for Ubuntu"
