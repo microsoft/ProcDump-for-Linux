@@ -338,6 +338,9 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
     set(libbpf_INCLUDE "${libbpf_BINARY_DIR}/usr/include")
   endif()
 
+  # We always need to find the bpftool program
+  find_package(Bpf REQUIRED COMPONENTS bpftool)
+
   target_link_libraries(procdump ${libbpf_LINK})
 
   # set binaries and options for clang and llc
@@ -386,17 +389,31 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
     list(APPEND CLANG_INCLUDES -I "/usr/include/x86_64-linux-gnu")
   endif()
 
-  add_custom_target(procdump_ebpf
-                    DEPENDS procdump_ebpf.o
-                  )
-
-  add_dependencies(procdump_ebpf libbpf)
-
   add_custom_command(OUTPUT procdump_ebpf.o
-                    COMMAND "${CLANG}" -nostdinc -isystem `gcc -print-file-name=include` ${CLANG_INCLUDES} ${CLANG_DEFINES} -O2 ${CLANG_OPTIONS} -target bpf -fno-stack-protector -c "${procdump_ebpf_SOURCE_DIR}/procdump_ebpf.c" -o "procdump_ebpf.o" && bpftool gen object procdump.ebpf.o procdump_ebpf.o && bpftool gen skeleton "procdump.ebpf.o" name "procdump_ebpf" > "procdump_ebpf.skel.h"
-                    COMMENT "Building EBPF object procdump_ebpf.o"
-                    DEPENDS ${procdump_ebpf_SOURCE_DIR}/procdump_ebpf.c
-                    )
+    COMMAND "${CLANG}" -nostdinc -isystem `gcc -print-file-name=include` ${CLANG_INCLUDES} ${CLANG_DEFINES} -O2 ${CLANG_OPTIONS} -target bpf -fno-stack-protector -c "${procdump_ebpf_SOURCE_DIR}/procdump_ebpf.c" -o "procdump_ebpf.o"
+    COMMENT "Building EBPF object procdump_ebpf.o"
+    DEPENDS ${procdump_ebpf_SOURCE_DIR}/procdump_ebpf.c
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+  )
+  add_custom_command(OUTPUT procdump.ebpf.o
+    COMMAND Bpf::bpftool gen object procdump.ebpf.o procdump_ebpf.o
+    COMMENT "Generating procdump.ebpf.o"
+    DEPENDS procdump_ebpf.o
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+  )
+
+  add_custom_command(OUTPUT procdump_ebpf.skel.h
+    COMMAND Bpf::bpftool gen skeleton "procdump.ebpf.o" name "procdump_ebpf" > "procdump_ebpf.skel.h"
+    COMMENT "Writing EBPF header procdump_ebpf.skel.h"
+    DEPENDS procdump.ebpf.o
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+  )
+
+  add_custom_target(procdump_ebpf DEPENDS
+    procdump_ebpf.o
+    procdump.ebpf.o
+    procdump_ebpf.skel.h
+  )
 
   add_dependencies(procdump_ebpf ${libbpf_LINK})
 endif()
