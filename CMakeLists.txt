@@ -31,13 +31,17 @@ cmake_policy(SET CMP0048 NEW)
 # set the project name - version is MAJOR.MINOR.PATCH.RELEASE - releases start at 1
 #
 if (DEFINED ENV{VERSION})
-  project(ProcDumpForLinux VERSION $ENV{VERSION})
+  project(ProcDumpForLinux VERSION $ENV{VERSION} LANGUAGES C CXX)
 else()
-  project(ProcDumpForLinux VERSION 0.0.0)
+  project(ProcDumpForLinux VERSION 0.0.0 LANGUAGES C CXX)
 endif()
 
 set(PROJECT_VERSION_TWEAK 0)
 file(READ "dist/changelog" CHANGE_LOG)
+
+option(PROCDUMP_DISABLE_SYSTEM_LIBBPF "Don't attempt to use an installed libbpf" OFF)
+
+include(GNUInstallDirs)
 
 #
 # package name
@@ -306,17 +310,35 @@ endif()
 # Make ProcDump eBPF program
 #
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
-  # Fetch libbpf
-  include(ExternalProject)
+  # Attempt to use system-installed libbpf
+  if(NOT PROCDUMP_DISABLE_SYSTEM_LIBBPF)
+    find_package(Bpf COMPONENTS libbpf)
+    if(Bpf_FOUND)
+      set(libbpf_LINK Bpf::libbpf)
+      set(libbpf_INCLUDE "${Bpf_INCLUDE_DIRS}")
+    endif()
+  endif()
 
-  ExternalProject_Add(libbpf
-      GIT_REPOSITORY https://github.com/libbpf/libbpf.git
-      GIT_TAG v1.2.2
-      PREFIX ./libbpf
-      CONFIGURE_COMMAND ""
-      BUILD_COMMAND cd ../libbpf/src && bash -c "CFLAGS=\"-g -O2 -Werror -Wall -fPIC\" make"
-      INSTALL_COMMAND ""
-      )
+  if(NOT Bpf_FOUND)
+    # Fetch libbpf
+    include(ExternalProject)
+
+    ExternalProject_Add(libbpf
+        GIT_REPOSITORY https://github.com/libbpf/libbpf.git
+        GIT_TAG v1.2.2
+        PREFIX ./libbpf
+        CONFIGURE_COMMAND ""
+        BUILD_COMMAND
+          cd ../libbpf/src &&
+          bash -c "CFLAGS=\"-g -O2 -Werror -Wall -fPIC\" make"
+        INSTALL_COMMAND
+          cd ../libbpf/src && bash -c "DESTDIR=<INSTALL_DIR> make install"
+        )
+    set(libbpf_LINK "${libbpf_BINARY_DIR}/usr/${CMAKE_INSTALL_LIBDIR}/libbpf.a")
+    set(libbpf_INCLUDE "${libbpf_BINARY_DIR}/usr/include")
+  endif()
+
+  target_link_libraries(procdump ${libbpf_LINK})
 
   # set binaries and options for clang and llc
   set(CLANG "clang")
@@ -353,7 +375,7 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
                     #-I "/usr/include/x86_64-linux-gnu"
                     -I "${CMAKE_SOURCE_DIR}"
                     -I "${CMAKE_BINARY_DIR}"
-                    -I "${libbpf_SOURCE_DIR}/src"
+                    -I "${libbpf_INCLUDE}"
                     )
 
   if(NOT APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
@@ -376,5 +398,5 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
                     DEPENDS ${procdump_ebpf_SOURCE_DIR}/procdump_ebpf.c
                     )
 
-  set_directory_properties(PROPERTIES ADDITIONAL_MAKE_CLEAN_FILES procdump.ebpf.o)
+  add_dependencies(procdump_ebpf ${libbpf_LINK})
 endif()
