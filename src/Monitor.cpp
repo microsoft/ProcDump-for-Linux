@@ -1319,8 +1319,6 @@ void *CpuMonitoringThread(void *thread_args /* struct ProcDumpConfiguration* */)
     Trace("CpuMonitoringThread: Enter [id=%d]", gettid());
     struct ProcDumpConfiguration *config = (struct ProcDumpConfiguration *)thread_args;
 
-    unsigned long totalTime = 0;
-    unsigned long elapsedTime = 0;
     int cpuUsage;
     auto_free struct CoreDumpWriter *writer = NULL;
     auto_free char* dumpFileName = NULL;
