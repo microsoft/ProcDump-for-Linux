@@ -64,27 +64,6 @@ extends:
               ./run.sh
             displayName: 'Run unit tests'
 
-          - script: |
-              mkdir $(Build.ArtifactStagingDirectory)/logs
-              cp /var/log/syslog $(Build.ArtifactStagingDirectory)/logs
-              cp /var/tmp/procdumpprofiler.log $(Build.ArtifactStagingDirectory)/logs
-            displayName: 'Copy log artifacts to staging'
-            condition: always()
-
-          - task: PublishBuildArtifacts@1
-            condition: always()
-            inputs:
-              PathtoPublish: '$(Build.ArtifactStagingDirectory)/logs/syslog'
-              ArtifactName: 'syslog'
-              publishLocation: 'Container'
-
-          - task: PublishBuildArtifacts@1
-            condition: always()
-            inputs:
-              PathtoPublish: '$(Build.ArtifactStagingDirectory)/logs/procdumpprofiler.log'
-              ArtifactName: 'procdumpprofiler_arm64.log'
-              publishLocation: 'Container'
-
         - job: "ProcDump_Build_AMD64_Run_Tests"
           pool:
             type: linux
@@ -116,27 +95,6 @@ extends:
               cd procdump_build/tests/integration
               ./run.sh
             displayName: 'Run unit tests'
-
-          - script: |
-              mkdir $(Build.ArtifactStagingDirectory)/logs
-              cp /var/log/syslog $(Build.ArtifactStagingDirectory)/logs
-              cp /var/tmp/procdumpprofiler.log $(Build.ArtifactStagingDirectory)/logs
-            displayName: 'Copy log artifacts to staging'
-            condition: always()
-
-          - task: PublishBuildArtifacts@1
-            condition: always()
-            inputs:
-              PathtoPublish: '$(Build.ArtifactStagingDirectory)/logs/syslog'
-              ArtifactName: 'syslog'
-              publishLocation: 'Container'
-
-          - task: PublishBuildArtifacts@1
-            condition: always()
-            inputs:
-              PathtoPublish: '$(Build.ArtifactStagingDirectory)/logs/procdumpprofiler.log'
-              ArtifactName: 'procdumpprofiler_amd64.log'
-              publishLocation: 'Container'
 
         - job: "ProcDump_Build_MACOS_Run_Tests"
           pool:
