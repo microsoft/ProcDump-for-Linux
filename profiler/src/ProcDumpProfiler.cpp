@@ -713,7 +713,7 @@ std::string CorProfiler::GetDumpName(u_int16_t dumpCount, std::string name)
             LOG(TRACE) << "CorProfiler::GetDumpName: Failed to get localtime.";
             return "";
         }
-        strftime(date, 26, "%Y-%m-%d_%H_%M_%S", timerInfo);
+        strftime(date, 26, "%y%m%d_%H%M%S", timerInfo);
         LOG(TRACE) << "CorProfiler::GetDumpName: Date/time " << date;
 
         tmp << fullDumpPath << processName.c_str() << "_" << dumpCount << "_" << name << "_" << date;

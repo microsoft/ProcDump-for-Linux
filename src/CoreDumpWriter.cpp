@@ -99,7 +99,7 @@ char* GetCoreDumpPrefixName(pid_t pid, char* procName, char* dumpPath, char* dum
         Trace("GetCoreDumpName: failed localtime");
         exit(-1);
     }
-    strftime(date, 26, "%Y-%m-%d_%H_%M_%S", timerInfo);
+    strftime(date, 26, "%y%m%d_%H%M%S", timerInfo);
 
     // assemble the full file name (including path) for core dumps
     if(dumpName != NULL)
