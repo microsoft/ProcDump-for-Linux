@@ -203,7 +203,7 @@ void InitProcDumpConfiguration(struct ProcDumpConfiguration *self)
     {
         self->memAllocMap.clear();
     }
-#endif    
+#endif
 }
 
 //--------------------------------------------------------------------
@@ -222,9 +222,9 @@ void FreeProcDumpConfiguration(struct ProcDumpConfiguration *self)
     DestroyEvent(&(self->evtStartMonitoring.event));
 
     pthread_mutex_destroy(&self->ptrace_mutex);
-#ifdef __linux__    
+#ifdef __linux__
     pthread_mutex_destroy(&self->memAllocMapMutex);
-#endif    
+#endif
     //sem_destroy(&(self->semAvailableDumpSlots.semaphore));
     sem_close(self->semAvailableDumpSlots.semaphore);
     sem_unlink("/procdump_sem");
@@ -406,7 +406,7 @@ struct ProcDumpConfiguration * CopyProcDumpConfiguration(struct ProcDumpConfigur
         copy->socketPath = self->socketPath == NULL ? NULL : strdup(self->socketPath);
         copy->bDumpOnException = self->bDumpOnException;
         copy->statusSocket = self->statusSocket;
-#ifdef __linux__        
+#ifdef __linux__
         copy->memAllocMap = self->memAllocMap;
 #endif
         return copy;
@@ -488,7 +488,7 @@ int GetOptions(struct ProcDumpConfiguration *self, int argc, char *argv[])
 
             i++;
         }
-#ifdef __linux__        
+#ifdef __linux__
         else if( 0 == strcasecmp( argv[i], "/gcm" ) ||
                     0 == strcasecmp( argv[i], "-gcm" ))
         {
@@ -652,7 +652,7 @@ int GetOptions(struct ProcDumpConfiguration *self, int argc, char *argv[])
 
             i++;
         }
-#endif        
+#endif
         else if( 0 == strcasecmp( argv[i], "/tc" ) ||
                     0 == strcasecmp( argv[i], "-tc" ))
         {
@@ -745,7 +745,7 @@ int GetOptions(struct ProcDumpConfiguration *self, int argc, char *argv[])
 
             i++;
         }
-#ifdef __linux__        
+#ifdef __linux__
         else if( 0 == strcasecmp( argv[i], "/e" ) ||
                     0 == strcasecmp( argv[i], "-e" ))
         {
@@ -804,7 +804,7 @@ int GetOptions(struct ProcDumpConfiguration *self, int argc, char *argv[])
 
             i++;
         }
-#endif        
+#endif
         else if( 0 == strcasecmp( argv[i], "/o" ) ||
                     0 == strcasecmp( argv[i], "-o" ))
         {
@@ -815,13 +815,13 @@ int GetOptions(struct ProcDumpConfiguration *self, int argc, char *argv[])
         {
             self->WaitingForProcessName = true;
         }
-#ifdef __linux__        
+#ifdef __linux__
         else if( 0 == strcasecmp( argv[i], "/pgid" ) ||
                     0 == strcasecmp( argv[i], "-pgid" ))
         {
             self->bProcessGroup = true;
         }
-#endif        
+#endif
         else
         {
             // Process targets
@@ -1250,7 +1250,7 @@ bool PrintConfiguration(struct ProcDumpConfiguration *self)
 void PrintBanner()
 {
     printf("\nProcDump v%s - Sysinternals process dump utility\n", STRFILEVER);
-    printf("Copyright (C) 2024 Microsoft Corporation. All rights reserved. Licensed under the MIT license.\n");
+    printf("Copyright (C) 2025 Microsoft Corporation. All rights reserved. Licensed under the MIT license.\n");
     printf("Mark Russinovich, Mario Hewardt, John Salem, Javid Habibi\n");
     printf("Sysinternals - www.sysinternals.com\n\n");
 
@@ -1273,7 +1273,7 @@ int PrintUsage()
     printf("            [-m|-ml Commit_Usage1[,Commit_Usage2...]]\n");
     printf("            [-tc Thread_Threshold]\n");
     printf("            [-fc FileDescriptor_Threshold]\n");
-#ifdef __linux__    
+#ifdef __linux__
     printf("            [-gcm [<GCGeneration>: | LOH: | POH:]Memory_Usage1[,Memory_Usage2...]]\n");
     printf("            [-gcgen Generation]\n");
     printf("            [-restrack [nodump]]\n");
@@ -1283,12 +1283,12 @@ int PrintUsage()
     printf("            [-f Include_Filter,...]\n");
     printf("            [-fx Exclude_Filter]\n");
     printf("            [-mc Custom_Dump_Mask]\n");
-#endif    
+#endif
     printf("            [-pf Polling_Frequency]\n");
     printf("            [-o]\n");
     printf("            [-log syslog|stdout]\n");
     printf("            {\n");
-#ifdef __linux__    
+#ifdef __linux__
     printf("             {{[-w] Process_Name | [-pgid] PID} [Dump_File | Dump_Folder]}\n");
 #elif defined(__APPLE__)
     printf("             {{[-w] Process_Name | PID} [Dump_File | Dump_Folder]}\n");

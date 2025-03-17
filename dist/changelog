@@ -1,3 +1,9 @@
+* Mon Mar 17 2025 Mario Hewardt <marioh@microsoft.com> - 3.4.1
+- Fix bug that removes : from the core dump file names
+
+* Wed Jan 29 2025 Mario Hewardt <marioh@microsoft.com> - 3.4
+- Adds ARM64 support and compilation fixes
+
 * Sat May 25 2024 Mario Hewardt <marioh@microsoft.com> - 3.3
 - Adds improvements related to containerized workflows
 
