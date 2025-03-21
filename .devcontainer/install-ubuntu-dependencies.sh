@@ -50,10 +50,6 @@ if [[ "$arch" == "aarch64" ]]; then
     ./dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet
 else
     # Not ARM64, we can install dotnet the normal way.
-    # install .NET 6 for signing process and integration tests
-    wget https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
-    dpkg -i packages-microsoft-prod.deb
-    rm packages-microsoft-prod.deb
-    apt -y update && apt-get install -y dotnet-runtime-6.0
-    apt-get install -y dotnet-sdk-6.0
+    # install .NET 8 for signing process and integration tests
+    apt install -y dotnet-sdk-8.0
 fi
