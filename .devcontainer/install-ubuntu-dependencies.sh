@@ -10,9 +10,10 @@ apt upgrade -y \
     curl \
     jq \
     git \
+    cmake \
     iputils-ping \
     libcurl4 \
-    libicu66 \
+    libicu70 \
     libunwind8 \
     netcat \
     gdb \
@@ -25,16 +26,11 @@ apt upgrade -y \
     gettext \
     liblocale-gettext-perl \
     pax \
-    cmake \
     libelf-dev \
     clang \
-    clang-12 \
     llvm \
     build-essential \
     libbpf-dev
-
-# Set preference to clang-12
-update-alternatives --install /usr/bin/clang clang /usr/bin/clang-12 100
 
 # Build and install bpftool
 rm -rf /usr/sbin/bpftool
@@ -49,7 +45,7 @@ wget https://github.com/debbuild/debbuild/releases/download/22.02.1/debbuild_22.
 
 arch=$(uname -m)
 if [[ "$arch" == "aarch64" ]]; then
-    wget https://dot.net/v1/dotnet-install.sh
+    wget https://dot.net/v1/dotnet-install.sh 
     chmod +x dotnet-install.sh
     ./dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet
 else
@@ -58,6 +54,6 @@ else
     wget https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
     dpkg -i packages-microsoft-prod.deb
     rm packages-microsoft-prod.deb
-    apt -y update && apt-get install -y dotnet-runtime-8.0
-    apt-get install -y dotnet-sdk-8.0
+    apt -y update && apt-get install -y dotnet-runtime-6.0
+    apt-get install -y dotnet-sdk-6.0
 fi
