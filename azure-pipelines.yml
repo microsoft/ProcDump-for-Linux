@@ -92,6 +92,7 @@ extends:
           - template: templates/build.yaml@ProcDump
 
           - script: |
+              ss -tulnp | grep 5032
               cd procdump_build/tests/integration
               ./run.sh
             displayName: 'Run unit tests'
