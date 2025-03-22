@@ -65,8 +65,6 @@ extends:
             displayName: 'Run unit tests'
 
         - job: "ProcDump_Build_AMD64_Run_Tests"
-          dependsOn: 
-            - ProcDump_Build_ARM64_Run_Tests       
           pool:
             type: linux
           variables:
