@@ -30,7 +30,8 @@ apt upgrade -y \
     clang \
     llvm \
     build-essential \
-    libbpf-dev
+    libbpf-dev \
+    sudo
 
 # Build and install bpftool
 rm -rf /usr/sbin/bpftool
