@@ -12,6 +12,7 @@ cd $TESTWEBAPIPATH
 rm -rf *TestWebApi_*Exception*
 pkill -9 TestWebApi
 pkill -9 procdump
+dotnet restore --configfile ../../../../nuget.config
 dotnet run --urls=http://localhost:5032&
 
 # waiting TestWebApi ready to service
