@@ -18,8 +18,8 @@
 #define __PROCDUMP_EBPF_H__
 
 #include "vmlinux.h"
-#include <bpf_helpers.h>
-#include <usdt.bpf.h>
+#include <bpf/bpf_helpers.h>
+#include <bpf/usdt.bpf.h>
 
 #define USER_STACKID_FLAGS (0 | BPF_F_FAST_STACK_CMP | BPF_F_USER_STACK)
 #define ARGS_HASH_SIZE 10240
