@@ -503,7 +503,8 @@ UShortToPtr(
 typedef _W64 __int32 INT_PTR;
 typedef _W64 unsigned __int32 UINT_PTR;
 
-typedef _W64 __int32 LONG_PTR;
+typedef _W64 __int32 LONG_PTR, *PLONG_PTR;
+
 typedef _W64 unsigned __int32 ULONG_PTR, *PULONG_PTR;
 typedef _W64 unsigned __int32 DWORD_PTR, *PDWORD_PTR;
 
