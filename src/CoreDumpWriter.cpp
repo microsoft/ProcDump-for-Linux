@@ -359,7 +359,17 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
         {
             Log(error, "An error occurred while generating the core dump:");
             if (gcoreStatus != 0)
+            {
                 Log(error, "\tDump exit status = %d", gcoreStatus);
+
+                // if gcore is not found, the child process created to execute it will return a status of 127
+                if (gcoreStatus == 127)
+                {
+                    Log(error, "failed to start gcore process in $PATH. Check that gdb/gcore is installed and configured on your system.");
+                    Trace("WriteCoreDumpInternal: failed to start gcore (127)");
+                    exit(-1);
+                }
+            }
             if (pcloseStatus != 0)
                 Log(error, "\tError closing pipe: %d", pcloseStatus);
             if (gcoreFailedMsg)
