@@ -1037,6 +1037,15 @@ int GetOptions(struct ProcDumpConfiguration *self, int argc, char *argv[])
         return PrintUsage();
     }
 
+    // Except for Restrack with -nodump option and .NET triggers, all other triggers use gdb/gcore
+    if(self->bRestrackEnabled && self->bRestrackGenerateDump || dotnetTriggerCount == 0)
+    {
+        if(!isBinaryOnPath("gcore")){
+            Log(error, "failed to locate gcore binary in $PATH. Check that gdb/gcore is installed and configured on your system.");
+            return -1;
+        }
+    }
+
     // Apply default values for any config values that were not specified by user
     ApplyDefaults(self);
 

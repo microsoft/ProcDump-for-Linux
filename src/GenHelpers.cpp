@@ -480,6 +480,38 @@ bool createDir(const char *dir, mode_t perms)
 
 //--------------------------------------------------------------------
 //
+// isBinaryOnPath
+//
+// Checks whether a binary can be found in any of the directories from the PATH.
+//
+//--------------------------------------------------------------------
+bool isBinaryOnPath(const char *binary){
+    char binbuf[4096];
+    struct stat statbuf;
+
+    char *path = getenv("PATH");
+    if(path == NULL)
+    {
+        return false;
+    }
+
+    char* directory = strtok(path, ":");
+    while (directory != NULL)
+    {
+        snprintf(binbuf, sizeof(binbuf), "%s/%s", directory, binary);
+        if (stat(binbuf, &statbuf) == 0 && S_ISREG(statbuf.st_mode))
+        {
+            return true;
+        }
+        
+        directory = strtok(NULL, ":");
+    }
+
+    return false;
+}
+
+//--------------------------------------------------------------------
+//
 // GetSocketPath
 //
 //--------------------------------------------------------------------
