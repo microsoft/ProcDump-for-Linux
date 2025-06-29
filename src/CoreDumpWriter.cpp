@@ -365,9 +365,8 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
                 // if gcore is not found, the child process created to execute it will return a status of 127
                 if (gcoreStatus == 127)
                 {
-                    Log(error, "failed to start gcore process in $PATH. Check that gdb/gcore is installed and configured on your system.");
+                    Log(error, "\tFailed to start gcore process in $PATH. Check that gdb/gcore is installed and configured on your system.");
                     Trace("WriteCoreDumpInternal: failed to start gcore (127)");
-                    exit(-1);
                 }
             }
             if (pcloseStatus != 0)
@@ -383,6 +382,8 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
                     Log(error, "GCORE - %s", outputBuffer[j]);
                 }
             }
+            // on any error from gcore or pipe interaction, after logging the problem, we stop execution
+            exit(-1);
         }
         else
         {
