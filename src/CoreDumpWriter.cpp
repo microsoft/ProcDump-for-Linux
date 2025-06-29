@@ -347,7 +347,7 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
         bool gcoreFailedMsg = false;    // in case error sneaks through the message output
 
         // check if gcore was able to generate the dump
-        if(outputBuffer[i-1] != NULL)
+        if(i > 0 && outputBuffer[i-1] != NULL)
         {
             if(strstr(outputBuffer[i-1], "gcore: failed") != NULL)
             {
