@@ -602,6 +602,22 @@ int CreateMonitorThreads(struct ProcDumpConfiguration *self)
             Trace("CreateMonitorThreads: failed to create RestrackThread.");
             return rc;
         }
+
+        // if '-restrack' was enabled without triggers, we wait a manual user input to be the trigger for a restrack snapshot
+        if ((self->bTimerThreshold == false) &&
+            (self->CpuThreshold == -1) &&
+            (self->MemoryThreshold == NULL) &&
+            (self->ThreadThreshold == -1) &&
+            (self->FileDescriptorThreshold == -1) &&
+            (self->DumpGCGeneration == -1) &&
+            (self->SignalCount == 0))
+        {
+            if ((rc = CreateMonitorThread(self, Manual, RestrackManualTriggerThread, (void *)self)) != 0)
+            {
+                Trace("CreateMonitorThreads: failed to create RestrackManualTriggerThread.");
+                return rc;
+            }
+        }
     }
 
     return 0;
@@ -902,6 +918,24 @@ extern long HZ;                                // clock ticks per second
 
 //--------------------------------------------------------------------
 //
+// WaitThread - Cancels the thread and waits for the specified thread using join.
+//
+//--------------------------------------------------------------------
+void WaitThread(pthread_t& thread)
+{
+    //
+    // If user hit CTRL+C, cancel the thread.
+    //
+    if(g_sigint == true)
+    {
+        pthread_cancel(thread);
+    }
+
+    pthread_join(thread, NULL);
+}
+
+//--------------------------------------------------------------------
+//
 // WaitThreads - Cancels the threads and waits for the specified threads
 // using join.
 //
@@ -910,15 +944,7 @@ void WaitThreads(std::vector<pthread_t>& threads)
 {
     for (auto& thread : threads)
     {
-        //
-        // If user hit CTRL+C, cancel the thread.
-        //
-        if(g_sigint == true)
-        {
-            pthread_cancel(thread);
-        }
-
-        pthread_join(thread, NULL);
+        WaitThread(thread);
     }
 }
 
@@ -1576,6 +1602,37 @@ void *DotNetMonitoringThread(void *thread_args /* struct ProcDumpConfiguration* 
     }
 #endif
     Trace("DotNetMonitoringThread: Exit [id=%d]", gettid());
+    return NULL;
+}
+
+//--------------------------------------------------------------------
+//
+// RestrackManualTriggerThread - Thread that waits a user command/signal to trigger a Restrack snapshot
+//
+//--------------------------------------------------------------------
+void* RestrackManualTriggerThread(void *thread_args /* struct ProcDumpConfiguration* */)
+{
+    Trace("RestrackManualTriggerThread: Enter [id=%d]", gettid());
+    struct ProcDumpConfiguration *config = (struct ProcDumpConfiguration *)thread_args;
+
+    auto_free struct CoreDumpWriter *writer = NewCoreDumpWriter(MANUAL, config);
+
+    if (WaitForQuitOrEvent(config, &config->evtStartMonitoring, INFINITE_WAIT) == WAIT_OBJECT_0 + 1)
+    {
+        Log(info, "Press any key to trigger a Restrack snapshot");
+        getchar();
+
+        pthread_t id = WriteRestrackSnapshot(config, writer->Type);
+        if (id >= 0)
+        {
+            // Wait for the leak reporting threads to finish
+            WaitThread(id);
+        }
+    }
+
+    SetQuit(config, 1);
+
+    Trace("RestrackManualTriggerThread: Exit [id=%d]", gettid());
     return NULL;
 }
 
