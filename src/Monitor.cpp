@@ -1628,6 +1628,10 @@ void* RestrackManualTriggerThread(void *thread_args /* struct ProcDumpConfigurat
             // Wait for the leak reporting threads to finish
             WaitThread(id);
         }
+        else
+        {
+            Log(error, "Failed to write Restrack snapshot");
+        }
     }
 
     SetQuit(config, 1);
