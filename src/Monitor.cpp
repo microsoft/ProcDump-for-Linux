@@ -612,7 +612,7 @@ int CreateMonitorThreads(struct ProcDumpConfiguration *self)
             (self->DumpGCGeneration == -1) &&
             (self->SignalCount == 0))
         {
-            if ((rc = CreateMonitorThread(self, Manual, RestrackManualTriggerThread, (void *)self)) != 0)
+            if ((rc = CreateMonitorThread(self, RestrackManual, RestrackManualTriggerThread, (void *)self)) != 0)
             {
                 Trace("CreateMonitorThreads: failed to create RestrackManualTriggerThread.");
                 return rc;
