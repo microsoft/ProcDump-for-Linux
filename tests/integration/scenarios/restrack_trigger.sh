@@ -13,8 +13,9 @@ echo [`date +"%T.%3N"`] "$PROCDUMPPATH -restrack $target_pid $dumpDir"
 yes | $PROCDUMPPATH "-restrack" $target_pid $dumpDir
 
 # asserts that restrack file was generated
-foundFile=$(find "$dumpDir" -mindepth 1 -name "cat_manual_*.restrack" -print -quit)
+foundFile=$(find "$dumpDir" -maxdepth 1 -name "cat_manual_*.restrack" -print -quit)
 if [[ -n $foundFile ]]; then
+    echo $foundFile
     exit 0
 else
     exit 1;

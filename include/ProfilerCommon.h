@@ -24,7 +24,7 @@ enum TriggerType
     GCThreshold,
     GCGeneration,
     Restrack,
-    Manual,
+    RestrackManual,
 };
 
 #endif // PROFILERCOMMON_H
