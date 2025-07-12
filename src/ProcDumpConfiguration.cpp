@@ -1000,12 +1000,14 @@ int GetOptions(struct ProcDumpConfiguration *self, int argc, char *argv[])
     }
 
     // If number of dumps to collect is set, but there is no other criteria, enable Timer here...
-    if ((self->CpuThreshold == -1) &&
+    if ((self->bTimerThreshold == false) &&
+        (self->CpuThreshold == -1) &&
         (self->MemoryThreshold == NULL) &&
         (self->ThreadThreshold == -1) &&
         (self->FileDescriptorThreshold == -1) &&
         (self->DumpGCGeneration == -1) &&
-        (self->SignalCount == 0))
+        (self->SignalCount == 0) &&
+        (self->bRestrackEnabled == false))
     {
         self->bTimerThreshold = true;
     }

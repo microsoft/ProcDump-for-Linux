@@ -46,6 +46,7 @@ void *FileDescriptorCountMonitoringThread(void *thread_args /* struct ProcDumpCo
 void *SignalMonitoringThread(void *thread_args /* struct ProcDumpConfiguration* */);
 void *TimerThread(void *thread_args /* struct ProcDumpConfiguration* */);
 void *DotNetMonitoringThread(void *thread_args /* struct ProcDumpConfiguration* */);
+void *RestrackManualTriggerThread(void *thread_args /* struct ProcDumpConfiguration* */);
 void *RestrackThread(void *thread_args /* struct ProcDumpConfiguration* */);
 void *ProcessMonitor(void *thread_args /* struct ProcDumpConfiguration* */);
 void *WaitForProfilerCompletion(void *thread_args /* struct ProcDumpConfiguration* */);
