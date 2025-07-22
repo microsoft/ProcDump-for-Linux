@@ -918,24 +918,6 @@ extern long HZ;                                // clock ticks per second
 
 //--------------------------------------------------------------------
 //
-// WaitThread - Cancels the thread and waits for the specified thread using join.
-//
-//--------------------------------------------------------------------
-void WaitThread(pthread_t& thread)
-{
-    //
-    // If user hit CTRL+C, cancel the thread.
-    //
-    if(g_sigint == true)
-    {
-        pthread_cancel(thread);
-    }
-
-    pthread_join(thread, NULL);
-}
-
-//--------------------------------------------------------------------
-//
 // WaitThreads - Cancels the threads and waits for the specified threads
 // using join.
 //
@@ -944,7 +926,15 @@ void WaitThreads(std::vector<pthread_t>& threads)
 {
     for (auto& thread : threads)
     {
-        WaitThread(thread);
+        //
+        // If user hit CTRL+C, cancel the thread.
+        //
+        if(g_sigint == true)
+        {
+            pthread_cancel(thread);
+        }
+
+        pthread_join(thread, NULL);
     }
 }
 
@@ -1615,12 +1605,14 @@ void* RestrackManualTriggerThread(void *thread_args /* struct ProcDumpConfigurat
     Trace("RestrackManualTriggerThread: Enter [id=%d]", gettid());
     struct ProcDumpConfiguration *config = (struct ProcDumpConfiguration *)thread_args;
 
+    struct TerminalState originalTerminalState;
+    auto_free struct CoreDumpWriter *writer = NULL;
     std::vector<pthread_t> leakReportThreads;
-    auto_free struct CoreDumpWriter *writer = NewCoreDumpWriter(MANUAL, config);
 
     // With the terminal in non-canonical mode, we can read input without waiting for a newline
     // This allows us to trigger a Restrack snapshot immediately when a key is pressed
-    struct terminal_state originalTerminalState = DisableTerminalCanonicalMode();
+    originalTerminalState = DisableTerminalCanonicalMode();
+    writer = NewCoreDumpWriter(MANUAL, config);
 
     int rc = 0;
     if ((rc = WaitForQuitOrEvent(config, &config->evtStartMonitoring, INFINITE_WAIT)) == WAIT_OBJECT_0 + 1)
@@ -1648,7 +1640,7 @@ void* RestrackManualTriggerThread(void *thread_args /* struct ProcDumpConfigurat
             }
             else if (c > 0)
             {
-                SetQuit(config, 1);
+                break;
             }
         }
 
@@ -1656,7 +1648,8 @@ void* RestrackManualTriggerThread(void *thread_args /* struct ProcDumpConfigurat
         WaitThreads(leakReportThreads);
     }
 
-    RestoreTerminalCanonicalMode(originalTerminalState);
+    RestoreTerminalState(originalTerminalState);
+    SetQuit(config, 1);
 
     Trace("RestrackManualTriggerThread: Exit [id=%d]", gettid());
     return NULL;
