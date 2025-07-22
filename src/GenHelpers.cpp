@@ -706,3 +706,45 @@ bool SetCoreDumpFilter(int pid, unsigned long filter)
     fclose(file);
     return ret;
 }
+
+//--------------------------------------------------------------------
+// DisableTerminalCanonicalMode
+//
+// Disables canonical mode and echo mode on the terminal, allowing
+// for immediate input processing without waiting for a newline.
+//
+// Returns the original terminal state so it can be restored later.
+//
+//--------------------------------------------------------------------
+terminal_state DisableTerminalCanonicalMode()
+{
+    struct terminal_state originalState = {};
+    struct termios modifiedTermios;
+
+    // Backups the current terminal attributes and disables canonical mode from terminal,
+    // which is the mode that waits for a newline.
+    tcgetattr(STDIN_FILENO, &originalState.termios);
+    modifiedTermios = originalState.termios;
+    modifiedTermios.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &modifiedTermios);
+    
+    // Backups the current file descriptor flags and sets the file descriptor to non-blocking mode
+    // so that getchar() does not block.
+    originalState.fileDescriptorFlags = fcntl(STDIN_FILENO, F_GETFL, 0);
+    fcntl(STDIN_FILENO, F_SETFL, originalState.fileDescriptorFlags | O_NONBLOCK);
+
+    return originalState;
+}
+
+//--------------------------------------------------------------------
+// RestoreTerminalCanonicalMode
+//
+// Restores the terminal to its original state, including the
+// terminal attributes and file descriptor flags.
+//
+// --------------------------------------------------------------------
+void RestoreTerminalCanonicalMode(terminal_state originalState)
+{
+    tcsetattr(STDIN_FILENO, TCSANOW, &originalState.termios);
+    fcntl(STDIN_FILENO, F_SETFL, originalState.fileDescriptorFlags);   
+}
