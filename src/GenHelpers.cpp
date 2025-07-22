@@ -716,9 +716,9 @@ bool SetCoreDumpFilter(int pid, unsigned long filter)
 // Returns the original terminal state so it can be restored later.
 //
 //--------------------------------------------------------------------
-terminal_state DisableTerminalCanonicalMode()
+TerminalState DisableTerminalCanonicalMode()
 {
-    struct terminal_state originalState = {};
+    struct TerminalState originalState;
     struct termios modifiedTermios;
 
     // Backups the current terminal attributes and disables canonical mode from terminal,
@@ -737,14 +737,14 @@ terminal_state DisableTerminalCanonicalMode()
 }
 
 //--------------------------------------------------------------------
-// RestoreTerminalCanonicalMode
+// RestoreTerminalState
 //
 // Restores the terminal to its original state, including the
 // terminal attributes and file descriptor flags.
 //
 // --------------------------------------------------------------------
-void RestoreTerminalCanonicalMode(terminal_state originalState)
+void RestoreTerminalState(TerminalState state)
 {
-    tcsetattr(STDIN_FILENO, TCSANOW, &originalState.termios);
-    fcntl(STDIN_FILENO, F_SETFL, originalState.fileDescriptorFlags);   
+    tcsetattr(STDIN_FILENO, TCSANOW, &state.termios);
+    fcntl(STDIN_FILENO, F_SETFL, state.fileDescriptorFlags);   
 }

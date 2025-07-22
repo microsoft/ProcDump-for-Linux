@@ -134,14 +134,14 @@ pid_t gettid() noexcept;
 unsigned long GetCoreDumpFilter(int pid);
 bool SetCoreDumpFilter(int pid, unsigned long filter);
 
-struct terminal_state
+struct TerminalState
 {
     struct termios termios;
     int fileDescriptorFlags;
 };
 
-terminal_state DisableTerminalCanonicalMode();
-void RestoreTerminalCanonicalMode(terminal_state originalState);
+TerminalState DisableTerminalCanonicalMode();
+void RestoreTerminalState(TerminalState state);
 
 #endif // GENHELPERS_H
 
