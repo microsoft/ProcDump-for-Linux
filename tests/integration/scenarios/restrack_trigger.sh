@@ -10,7 +10,7 @@ target_pid=$!
 
 # sends 'y' when the message 'Press any key to trigger a Restrack snapshot' appears
 echo [`date +"%T.%3N"`] "$PROCDUMPPATH -restrack $target_pid $dumpDir"
-yes | $PROCDUMPPATH "-restrack" $target_pid $dumpDir
+echo 't' | $PROCDUMPPATH "-restrack" $target_pid $dumpDir
 
 # asserts that restrack file was generated
 foundFile=$(find "$dumpDir" -maxdepth 1 -name "cat_manual_*.restrack" -print -quit)
