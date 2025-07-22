@@ -1615,26 +1615,48 @@ void* RestrackManualTriggerThread(void *thread_args /* struct ProcDumpConfigurat
     Trace("RestrackManualTriggerThread: Enter [id=%d]", gettid());
     struct ProcDumpConfiguration *config = (struct ProcDumpConfiguration *)thread_args;
 
+    std::vector<pthread_t> leakReportThreads;
     auto_free struct CoreDumpWriter *writer = NewCoreDumpWriter(MANUAL, config);
 
-    if (WaitForQuitOrEvent(config, &config->evtStartMonitoring, INFINITE_WAIT) == WAIT_OBJECT_0 + 1)
-    {
-        Log(info, "Press any key to trigger a Restrack snapshot");
-        getchar();
+    // With the terminal in non-canonical mode, we can read input without waiting for a newline
+    // This allows us to trigger a Restrack snapshot immediately when a key is pressed
+    struct terminal_state originalTerminalState = DisableTerminalCanonicalMode();
 
-        pthread_t id = WriteRestrackSnapshot(config, writer->Type);
-        if (id >= 0)
+    int rc = 0;
+    if ((rc = WaitForQuitOrEvent(config, &config->evtStartMonitoring, INFINITE_WAIT)) == WAIT_OBJECT_0 + 1)
+    {
+        Log(info, "Press 't' to trigger a Restrack snapshot (or any other key to exit)...");
+
+        char c = -1;
+        while ((rc = WaitForQuit(config, 0)) == WAIT_TIMEOUT || c == -1)
         {
-            // Wait for the leak reporting threads to finish
-            WaitThread(id);
+            c = getchar();
+            if (c == 't' || c == 'T')
+            {
+                c = -1; // Reset c to -1 so we keep triggering snapshots until another key is pressed
+                Log(info, "Triggering Restrack snapshot...");
+                pthread_t id = WriteRestrackSnapshot(config, writer->Type);
+                if (id >= 0)
+                {
+                    // Wait for the leak reporting threads to finish
+                    leakReportThreads.push_back(id);
+                }
+                else
+                {
+                    Log(error, "Failed to write Restrack snapshot");
+                }
+            }
+            else if (c > 0)
+            {
+                SetQuit(config, 1);
+            }
         }
-        else
-        {
-            Log(error, "Failed to write Restrack snapshot");
-        }
+
+        // Wait for the leak reporting threads to finish
+        WaitThreads(leakReportThreads);
     }
 
-    SetQuit(config, 1);
+    RestoreTerminalCanonicalMode(originalTerminalState);
 
     Trace("RestrackManualTriggerThread: Exit [id=%d]", gettid());
     return NULL;
