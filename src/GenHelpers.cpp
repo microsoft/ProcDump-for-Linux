@@ -711,7 +711,7 @@ bool SetCoreDumpFilter(int pid, unsigned long filter)
 // DisableTerminalCanonicalMode
 //
 // Disables canonical mode and echo mode on the terminal, allowing
-// for immediate input processing without waiting for a newline.
+// for immediate input processing without waiting for a newline and showing up the pressed key.
 //
 // Returns the original terminal state so it can be restored later.
 //
