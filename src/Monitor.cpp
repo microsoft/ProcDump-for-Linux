@@ -1608,24 +1608,24 @@ void* RestrackManualTriggerThread(void *thread_args /* struct ProcDumpConfigurat
     struct TerminalState originalTerminalState;
     auto_free struct CoreDumpWriter *writer = NULL;
     std::vector<pthread_t> leakReportThreads;
+    int rc = 0;
 
     // With the terminal in non-canonical mode, we can read input without waiting for a newline
     // This allows us to trigger a Restrack snapshot immediately when a key is pressed
     originalTerminalState = DisableTerminalCanonicalMode();
     writer = NewCoreDumpWriter(MANUAL, config);
 
-    int rc = 0;
     if ((rc = WaitForQuitOrEvent(config, &config->evtStartMonitoring, INFINITE_WAIT)) == WAIT_OBJECT_0 + 1)
     {
         Log(info, "Press 't' to trigger a Restrack snapshot (or any other key to exit)...");
-
-        char c = -1;
-        while ((rc = WaitForQuit(config, 0)) == WAIT_TIMEOUT || c == -1)
+        while ((rc = WaitForQuit(config, 1000)) == WAIT_TIMEOUT)
         {
-            c = getchar();
+            char c = getchar();
             if (c == 't' || c == 'T')
             {
-                c = -1; // Reset c to -1 so we keep triggering snapshots until another key is pressed
+                // Increase it to avoid the 'ContinueMonitoring' method to indicate that we are done
+                config->NumberOfDumpsToCollect += 1;
+
                 Log(info, "Triggering Restrack snapshot...");
                 pthread_t id = WriteRestrackSnapshot(config, writer->Type);
                 if (id >= 0)
@@ -1643,10 +1643,10 @@ void* RestrackManualTriggerThread(void *thread_args /* struct ProcDumpConfigurat
                 break;
             }
         }
-
-        // Wait for the leak reporting threads to finish
-        WaitThreads(leakReportThreads);
     }
+    
+    // Wait for the leak reporting threads to finish
+    WaitThreads(leakReportThreads);
 
     RestoreTerminalState(originalTerminalState);
     SetQuit(config, 1);
