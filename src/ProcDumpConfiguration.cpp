@@ -999,6 +999,12 @@ int GetOptions(struct ProcDumpConfiguration *self, int argc, char *argv[])
         return PrintUsage();
     }
 
+    // If restrack is enabled along with some time threshold, we enable Timer
+    if (self->ThresholdSeconds > 0 && self->bRestrackEnabled)
+    {
+        self->bTimerThreshold = true;
+    }
+
     // If number of dumps to collect is set, but there is no other criteria, enable Timer here...
     if ((self->bTimerThreshold == false) &&
         (self->CpuThreshold == -1) &&

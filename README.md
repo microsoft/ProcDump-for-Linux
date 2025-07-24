@@ -120,10 +120,14 @@ sudo procdump -c 65 -m 100 1234
 The following will create a core dump when memory usage is >= 100 MB followed by another dump when memory usage is >= 200MB.
 ```
 sudo procdump -m 100,200 1234
+```
 The following will create a memory leak report (no dumps) every time the user presses 't':
 ```
 sudo procdump -restrack 1234
 ```
+The following will create 3 memory leak reports (no dumps) 5 seconds apart:
+```
+sudo procdump -n 3 -s 5 -restrack nodump 1234
 ```
 The following will create a core dump and a memory leak report when memory usage is >= 100 MB
 ```
