@@ -1623,7 +1623,7 @@ void* RestrackManualTriggerThread(void *thread_args /* struct ProcDumpConfigurat
             char c = getchar();
             if (c == 't' || c == 'T')
             {
-                // Increase it to avoid the 'ContinueMonitoring' method to indicate that we are done
+                // Increase it to avoid the 'ContinueMonitoring' method indicate that we are done
                 config->NumberOfDumpsToCollect += 1;
 
                 Log(info, "Triggering Restrack snapshot...");

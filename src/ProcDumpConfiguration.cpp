@@ -1317,7 +1317,7 @@ int PrintUsage()
     printf("   -ml     Memory commit threshold(s) (MB) below which to create dumps.\n");
     printf("   -gcm    [.NET] GC memory threshold(s) (MB) above which to create dumps for the specified generation or heap (default is total .NET memory usage).\n");
     printf("   -gcgen  [.NET] Create dump when the garbage collection of the specified generation starts and finishes.\n");
-    printf("   -restrack Enable memory leak tracking (malloc family of APIs). Use the nodump option to prevent dump generation and only produce restrack report(s).\n");
+    printf("   -restrack Enable memory leak tracking (malloc family of APIs). If used without other triggers, use 't' to manually capture a restrack report. When used with other triggers, the 'nodump' option can be used to prevent dump generation and only produce restrack report(s).\n");
     printf("   -sr     Sample rate when using -restrack.\n");
     printf("   -sig    Comma separated list of signal number(s) during which any signal results in a dump of the process.\n");
     printf("   -e      [.NET] Create dump when the process encounters an exception.\n");
