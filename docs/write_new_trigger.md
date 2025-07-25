@@ -7,13 +7,13 @@ Before we start implementing the new trigger, let's take a look at the important
 
 ![Trigger Architecture](trigger_arch.jpg)
 
-Generally speaking, ProcDump triggers are all implemented in separate monitoring threads that are all located in [Monitor.c](../src/Monitor.c). For example, the monitoring thread that is responsible for the CPU threshold is called `CpuMonitoringThread`. These monitoring threads are responsible for periodically checking if the current resource usage (for example CPU) has gone above the user specified threshold. The data source used to figure out the current resource usage is entirely up to the trigger itself. For example, the memory and CPU triggers use procfs as the data source. As we'll see later on in this document, our new socket trigger will also utilize procfs as its data source.
+Generally speaking, ProcDump triggers are all implemented in separate monitoring threads that are all located in [Monitor.cpp](../src/Monitor.cpp). For example, the monitoring thread that is responsible for the CPU threshold is called `CpuMonitoringThread`. These monitoring threads are responsible for periodically checking if the current resource usage (for example CPU) has gone above the user specified threshold. The data source used to figure out the current resource usage is entirely up to the trigger itself. For example, the memory and CPU triggers use procfs as the data source. As we'll see later on in this document, our new socket trigger will also utilize procfs as its data source.
 
 All configuration options (including the various user specified thresholds) are stored in a `ProcDumpConfiguration` data structure that gets passed to the monitoring thread.
 
 There are two ways by which a monitoring thread can/should exit. First, if the goal of the monitoring thread has been achieved. For example, if the user specified that they wanted 3 dumps when CPU usage is greater than 95% and all three dumps have been created, the monitoring thread has achieved its goal and should exit. Second, the user can terminate ProcDump using CTRL-C at which time ProcDump should also exit. It's important to note that during a CTRL-C, ProcDump should exit as quickly as possible. Depending on the type of trigger being implemented, it may result in partial core dumps being generated. In order to make it easy for monitoring threads to observe the two terminating scenarios, ProcDump offers helper functions that most monitoring threads use and follow this pattern:
 
-```
+```cpp
     if ((rc = WaitForQuitOrEvent(config, &config->evtStartMonitoring, INFINITE_WAIT)) == WAIT_OBJECT_0 + 1)
     {
         while ((rc = WaitForQuit(config, config->PollingInterval)) == WAIT_TIMEOUT)
@@ -44,8 +44,8 @@ With the architecture above in mind, let's dive into the 4 steps needed to imple
 
 ## Step 1 - Update Command Line Parsing and Usage Output
 Before we can start making code changes, we must first decide on the name of the switch that our new trigger should use. There aren't any hard and fast rules when it comes to naming conventions, but generally speaking, try to use short (2 character) switch names if possible and of course make sure there isn't a naming conflict. ProcDump also supports both the `-` and `/` switch prefixes. In our socket trigger case, we'll use the `-so` switch name.
-The command line parsing code that needs to be updated is located in [GetOptions](../src/ProcDumpConfiguration.c) and looks like following:
-```
+The command line parsing code that needs to be updated is located in [GetOptions](../src/ProcDumpConfiguration.cpp) and looks like following:
+```cpp
         else if( 0 == strcasecmp( argv[i], "/so" ) ||
                  0 == strcasecmp( argv[i], "-so" ))
         {
@@ -62,9 +62,9 @@ The command line parsing code that needs to be updated is located in [GetOptions
 ```
 The above code ensures we are using the new `so` switch name, parses the specified threshold and stores it into a `ProcDumpConfiguration` data structure member called `SocketThreshold` (please see Step 2 below for information on `ProcDumpConfiguration` considerations).
 
-Next we want to make sure that we also update all the code locations where the ProcDump usage is displayed. First, update [PrintUsage](../src/ProcDumpConfiguration.c) to include the new switch (both short hand as well as longer description):
+Next we want to make sure that we also update all the code locations where the ProcDump usage is displayed. First, update [PrintUsage](../src/ProcDumpConfiguration.cpp) to include the new switch (both short hand as well as longer description):
 
-```
+```cpp
     printf("\nCapture Usage: \n");
     printf("   procdump [-n Count]\n");
     printf("            [-s Seconds]\n");
@@ -85,49 +85,39 @@ Next we want to make sure that we also update all the code locations where the P
 We also need to make the same updates in the [Man page](../procdump.1) and [README](../README.md)
 
 ## Step 2 - Update ProcDumpConfiguration
-Critical information that needs to be passed between the main ProcDump thread and the monitoring thread are stored in the `ProcDumpConfuguration` data structure. For our socket trigger, that involves storing the threshold that the user specified in order for the monitoring thread to know what to compare against. There are a few different code locations that we need to update. First we update the [Header](../include/ProcDumpConfiguration.h) to include the new threshold:
-```
+Critical information that needs to be passed between the main ProcDump thread and the monitoring thread are stored in the `ProcDumpConfiguration` data structure. For our socket trigger, that involves storing the threshold that the user specified in order for the monitoring thread to know what to compare against. There are a few different code locations that we need to update. First we update the [Header](../include/ProcDumpConfiguration.h) to include the new threshold:
+```cpp
     int SocketThreshold;            // -so
 ```
 
-Next, we have to update [InitProcDumpConfiguration](../src/ProcDumpConfiguration.c) to set the initial value:
-```
+Next, we have to update [InitProcDumpConfiguration](../src/ProcDumpConfiguration.cpp) to set the initial value:
+```cpp
     self->SocketThreshold =             -1;
 ```
 
-We also update the [CopyProcDumpConfiguration](../src/ProcDumpConfiguration.c) to make sure the value gets set properly in cases where the configuration must be copied:
-```
+We also update the [CopyProcDumpConfiguration](../src/ProcDumpConfiguration.cpp) to make sure the value gets set properly in cases where the configuration must be copied:
+```cpp
     copy->SocketThreshold = self->SocketThreshold;
 ```
 
-If the data you added to the configuration is dynamically allocated you should also ensure the memory is freed in [FreeProcDumpConfiguration](../src/ProcDumpConfiguration.c).
+If the data you added to the configuration is dynamically allocated you should also ensure the memory is freed in [FreeProcDumpConfiguration](../src/ProcDumpConfiguration.cpp).
 
 ## Step 3 - Create the New Monitoring Thread
 The next step is to create the monitoring thread that will be responsible for monitoring the socket usage.
 
-In [CreateMonitorThreads](../src/Monitor.c) we add the following code:
-```
-    if (self->SocketThreshold != -1 && !tooManyTriggers)
+In [CreateMonitorThreads](../src/Monitor.cpp) we add the following code:
+```cpp
+    if (self->SocketThreshold != -1)
     {
-        if (self->nThreads < MAX_TRIGGERS)
+        if ((rc = CreateMonitorThread(self, SocketCount, SocketCountMonitoringThread, (void *)self)) != 0 )
         {
-            if ((rc = pthread_create(&self->Threads[self->nThreads].thread, NULL, SocketCountMonitoringThread, (void *)self)) != 0)
-            {
-                Trace("CreateMonitorThreads: failed to create SocketThread.");
-                return rc;
-            }
-
-            self->Threads[self->nThreads].trigger = SocketCount;
-            self->nThreads++;
-        }
-        else
-        {
-            tooManyTriggers = true;
+            Trace("CreateMonitorThreads: failed to create SocketCountMonitoringThread.");
+            return rc;
         }
     }
 ```
 The above code checks to see if a socket threshold has been specified and if so creates a new thread with the thread function called `SocketCountMonitoringThread`. It also specifies the trigger type to be `SocketCount` which requires an additional change in [ProfilerCommon](../include/ProfilerCommon.h):
-```
+```cpp
 enum TriggerType
 {
     Processor,
@@ -143,8 +133,8 @@ The last step is actually implementing the code behind our new socket trigger. W
 void *SocketCountMonitoringThread(void *thread_args /* struct ProcDumpConfiguration* */);
 ```
 
-Next we add the boilerplate code for the function in [Monitor.c](../src/Monitor.c) explained in the [Trigger Architecture](#t_arch) section earlier in this document:
-```
+Next we add the boilerplate code for the function in [Monitor.cpp](../src/Monitor.cpp) explained in the [Trigger Architecture](#t_arch) section earlier in this document:
+```cpp
 //--------------------------------------------------------------------
 //
 // SocketCountMonitoringThread - Thread monitoring for socket count
@@ -175,7 +165,7 @@ void* SocketCountMonitoringThread(void *thread_args /* struct ProcDumpConfigurat
 ```
 In order to get the current socket count for the given process we define a helper function called `GetSocketCount`. We won't dive into the details of how this function is implemented as it's outside the scope of this document, but the general approach is to enumerate all file descriptors for the process (using procfs as the data source) and check which ones are socket based. The total count is then compared to the user specified threshold. Our socket monitoring thread now looks like (replacing the "Check for sockets count" comment above):
 
-```
+```cpp
         ...
         ...
         while ((rc = WaitForQuit(config, config->PollingInterval)) == WAIT_TIMEOUT)
