@@ -1603,6 +1603,7 @@ void *DotNetMonitoringThread(void *thread_args /* struct ProcDumpConfiguration* 
 void* RestrackManualTriggerThread(void *thread_args /* struct ProcDumpConfiguration* */)
 {
     Trace("RestrackManualTriggerThread: Enter [id=%d]", gettid());
+#ifdef __linux__
     struct ProcDumpConfiguration *config = (struct ProcDumpConfiguration *)thread_args;
 
     struct TerminalState originalTerminalState;
@@ -1650,7 +1651,7 @@ void* RestrackManualTriggerThread(void *thread_args /* struct ProcDumpConfigurat
 
     RestoreTerminalState(originalTerminalState);
     SetQuit(config, 1);
-
+#endif
     Trace("RestrackManualTriggerThread: Exit [id=%d]", gettid());
     return NULL;
 }
