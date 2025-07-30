@@ -43,6 +43,7 @@ extends:
               DEBIAN_FRONTEND=noninteractive apt -y update && apt install rsyslog -y
               rm -f /run/rsyslogd.pid
               service rsyslog start || true
+              echo "Ptrace status: $(cat /proc/sys/kernel/yama/ptrace_scope)"
             displayName: 'Enable syslog'
 
           - script: |
@@ -75,6 +76,7 @@ extends:
               DEBIAN_FRONTEND=noninteractive apt -y update && apt install rsyslog -y
               rm -f /run/rsyslogd.pid
               service rsyslog start || true
+              echo "Ptrace status: $(cat /proc/sys/kernel/yama/ptrace_scope)"
             displayName: 'Enable syslog'
 
           - script: |
