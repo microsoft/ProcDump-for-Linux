@@ -9,6 +9,7 @@ source $HELPERS
 pushd .
 cd $TESTWEBAPIPATH
 rm -rf *TestWebApi_*Exception*
+dotnet restore --configfile ../../../../nuget.config
 dotnet run --urls=http://localhost:5032&
 
 # waiting TestWebApi ready to service

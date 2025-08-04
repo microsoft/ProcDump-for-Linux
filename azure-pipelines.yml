@@ -36,7 +36,7 @@ extends:
             type: linux
             hostArchitecture: arm64
           variables:
-            LinuxContainerImage: 'mcr.microsoft.com/mirror/docker/library/ubuntu:22.04'
+            LinuxContainerImage: 'onebranch.azurecr.io/linux/ubuntu-2204:latest'
             ob_outputDirectory: '$(Build.SourcesDirectory)\out'
           steps:
           - script: |
@@ -68,7 +68,7 @@ extends:
           pool:
             type: linux
           variables:
-            LinuxContainerImage: 'mcr.microsoft.com/mirror/docker/library/ubuntu:22.04'
+            LinuxContainerImage: 'onebranch.azurecr.io/linux/ubuntu-2204:latest'
             ob_outputDirectory: '$(Build.SourcesDirectory)\out'
           steps:
           - script: |
