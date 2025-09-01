@@ -79,9 +79,12 @@ function runProcDumpAndValidate {
 		else    
 			TESTPROGPATH=$(readlink -m "$DIR/../../$TESTPROGNAME");
 		fi		
-		($TESTPROGPATH "$TESTPROGMODE") &
+		
+		# Break out the arguments in case there are spaces (e.g. mem 100M)
+		read -r -a _args <<< "$TESTPROGMODE"
+		($TESTPROGPATH "${_args[@]}") &
 		pid=$!
-		echo "Test App: $TESTPROGPATH $TESTPROGMODE"
+		echo "Test App: $TESTPROGPATH ${_args[@]}"
 		echo "PID: $pid"
 
 		sleep 30
@@ -94,6 +97,7 @@ function runProcDumpAndValidate {
 
 	if ps -p $pid > /dev/null
 	then
+		echo [`date +"%T.%3N"`] Killing Test Program: $pid
 		kill -9 $pid > /dev/null
 	fi
 

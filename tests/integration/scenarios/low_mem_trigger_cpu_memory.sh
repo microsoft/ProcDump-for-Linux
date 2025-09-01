@@ -3,8 +3,8 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )";
 runProcDumpAndValidate=$(readlink -m "$DIR/../runProcDumpAndValidate.sh");
 source $runProcDumpAndValidate
 
-# TARGETVALUE is only used for stress-ng
-TARGETVALUE=40M
+TESTPROGNAME="ProcDumpTestApplication"
+TESTPROGMODE="mem 40M"
 
 # These are all the ProcDump switches preceeding the PID
 PREFIX="-c 100 -ml 80"
@@ -14,9 +14,6 @@ POSTFIX=""
 
 # Indicates whether the test should result in a dump or not
 SHOULDDUMP=true
-
-# Only applicable to stress-ng and can be either MEM or CPU
-RESTYPE="MEM"
 
 # The dump target
 DUMPTARGET=""

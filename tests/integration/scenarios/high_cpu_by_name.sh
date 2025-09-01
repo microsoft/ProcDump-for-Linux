@@ -15,9 +15,6 @@ POSTFIX=""
 # Indicates whether the test should result in a dump or not
 SHOULDDUMP=true
 
-# Only applicable to stress-ng and can be either MEM or CPU
-# RESTYPE="CPU"
-
 # The dump target
 DUMPTARGET=""
 
