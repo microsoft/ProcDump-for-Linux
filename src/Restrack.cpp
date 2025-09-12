@@ -402,6 +402,7 @@ void* ReportLeaks(void* args)
     config->bLeakReportInProgress = true;
 
     bool symbolResolutionFailed = false;
+    int symbolResolutionErrorCode = 0;
     if(config->memAllocMap.size() > 0)
     {
         void* symResolver = bcc_symcache_new(config->ProcessId, NULL);
@@ -497,6 +498,9 @@ void* ReportLeaks(void* args)
                     if(resolveResult != 0 || sym.name == NULL)
                     {
                         symbolResolutionFailed = true;
+                        if(resolveResult != 0) {
+                            symbolResolutionErrorCode = resolveResult;
+                        }
                     }
 
                     frame.pc = pair.stackTrace[i];
@@ -566,7 +570,11 @@ void* ReportLeaks(void* args)
     // Also log to console if symbol resolution failed
     if(symbolResolutionFailed)
     {
-        Log(info, "Some stack frames could not be resolved. This may indicate missing debug symbols for the target application.");
+        if(symbolResolutionErrorCode != 0) {
+            Log(info, "Some stack frames could not be resolved (error code: %d). This may indicate missing debug symbols for the target application.", symbolResolutionErrorCode);
+        } else {
+            Log(info, "Some stack frames could not be resolved. This may indicate missing debug symbols for the target application.");
+        }
     }
 
     free(const_cast<char*>(leakArgs->filename));
