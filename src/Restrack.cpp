@@ -401,6 +401,7 @@ void* ReportLeaks(void* args)
 
     config->bLeakReportInProgress = true;
 
+    bool symbolResolutionFailed = false;
     if(config->memAllocMap.size() > 0)
     {
         void* symResolver = bcc_symcache_new(config->ProcessId, NULL);
@@ -478,7 +479,7 @@ void* ReportLeaks(void* args)
                 if(pair.stackTrace[i] > 0)
                 {
                     bcc_symbol sym;
-                    bcc_symcache_resolve(symResolver, pair.stackTrace[i], &sym);
+                    int resolveResult = bcc_symcache_resolve(symResolver, pair.stackTrace[i], &sym);
 
                     stackFrame frame = {};
                     frame.offset = sym.offset;
@@ -490,6 +491,12 @@ void* ReportLeaks(void* args)
                     if(sym.demangle_name != NULL)
                     {
                         frame.demangledSymbolName = sym.demangle_name;
+                    }
+
+                    // Track if symbol resolution failed
+                    if(resolveResult != 0 || sym.name == NULL)
+                    {
+                        symbolResolutionFailed = true;
                     }
 
                     frame.pc = pair.stackTrace[i];
@@ -541,6 +548,13 @@ void* ReportLeaks(void* args)
         }
 
         file << "\nTotal leaked: 0x" << std::hex << totalLeak << "\n";
+        
+        // Inform user if symbol resolution failed
+        if(symbolResolutionFailed)
+        {
+            file << "\nNote: Some stack frames could not be resolved to symbols. This may indicate missing debug symbols.\n";
+            file << "Consider installing debug symbols for the target application or ensure symbols are available.\n";
+        }
     }
     else
     {
@@ -548,6 +562,12 @@ void* ReportLeaks(void* args)
     }
 
     Log(info, "Leak report generated: %s", filename);
+    
+    // Also log to console if symbol resolution failed
+    if(symbolResolutionFailed)
+    {
+        Log(info, "Some stack frames could not be resolved to symbols. This may indicate missing debug symbols for the target application.");
+    }
 
     free(const_cast<char*>(leakArgs->filename));
     free(leakArgs);
