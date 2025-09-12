@@ -552,7 +552,7 @@ void* ReportLeaks(void* args)
         // Inform user if symbol resolution failed
         if(symbolResolutionFailed)
         {
-            file << "\nNote: Some stack frames could not be resolved to symbols. This may indicate missing debug symbols.\n";
+            file << "\nNote: Some stack frames could not be resolved. This may indicate missing debug symbols.\n";
             file << "Consider installing debug symbols for the target application or ensure symbols are available.\n";
         }
     }
@@ -566,7 +566,7 @@ void* ReportLeaks(void* args)
     // Also log to console if symbol resolution failed
     if(symbolResolutionFailed)
     {
-        Log(info, "Some stack frames could not be resolved to symbols. This may indicate missing debug symbols for the target application.");
+        Log(info, "Some stack frames could not be resolved. This may indicate missing debug symbols for the target application.");
     }
 
     free(const_cast<char*>(leakArgs->filename));
