@@ -50,7 +50,10 @@ bool IsCoreClrProcess(pid_t pid, char** socketName)
             char* ptr = GetPath(lineBuf);
             if(ptr!=NULL)
             {
-                if(strncmp(ptr, tmpFolder, strlen(tmpFolder)) == 0)
+                // Check if ptr matches tmpFolder followed by a dash to ensure exact PID match
+                // This prevents matching PIDs that have the target PID as a prefix (e.g., PID 1 matching PID 1168)
+                size_t tmpFolderLen = strlen(tmpFolder);
+                if(strncmp(ptr, tmpFolder, tmpFolderLen) == 0 && ptr[tmpFolderLen] == '-')
                 {
                     // Found the correct socket...copy the name to the out param
                     int len = strlen(ptr)+1;
