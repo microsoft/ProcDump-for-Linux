@@ -129,6 +129,7 @@ struct ProcDumpConfiguration
     char *ExcludeFilter;            // -fx (exclude filter)
     bool bRestrackEnabled;          // -restrack
     bool bRestrackGenerateDump;     // -restrack generate dump flag
+    bool bRestrackDecimalFormat;    // -restrack use decimal format instead of hex
     bool bLeakReportInProgress;
     int SampleRate;                 // Record every X resource allocation in restrack
     int CoreDumpMask;               // -mc (core dump mask)

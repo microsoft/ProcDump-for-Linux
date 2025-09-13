@@ -186,6 +186,7 @@ void InitProcDumpConfiguration(struct ProcDumpConfiguration *self)
     self->ExcludeFilter =               NULL;
     self->bRestrackEnabled =            false;
     self->bRestrackGenerateDump =       true;
+    self->bRestrackDecimalFormat =      false;
     self->bLeakReportInProgress =       false;
     self->SampleRate =                  0;
     self->CoreDumpMask =                -1;
@@ -360,6 +361,7 @@ struct ProcDumpConfiguration * CopyProcDumpConfiguration(struct ProcDumpConfigur
 
         copy->bRestrackEnabled = self->bRestrackEnabled;
         copy->bRestrackGenerateDump = self->bRestrackGenerateDump;
+        copy->bRestrackDecimalFormat = self->bRestrackDecimalFormat;
         copy->bLeakReportInProgress = self->bLeakReportInProgress;
         copy->SampleRate = self->SampleRate;
         copy->CoreDumpMask = self->CoreDumpMask;
@@ -592,15 +594,19 @@ int GetOptions(struct ProcDumpConfiguration *self, int argc, char *argv[])
                 return PrintUsage();
             }
 
-            if( i+1 >= argc)
+            // Check if there's an optional modifier
+            if( i+1 < argc && (strcasecmp(argv[i+1], "nodump") == 0 || strcasecmp(argv[i+1], "decimal") == 0))
             {
-                return PrintUsage();
-            }
-
-            if(strcasecmp(argv[i+1], "nodump") == 0 )
-            {
-                self->bRestrackGenerateDump = false;
-                i++;
+                if(strcasecmp(argv[i+1], "nodump") == 0 )
+                {
+                    self->bRestrackGenerateDump = false;
+                    i++;
+                }
+                else if(strcasecmp(argv[i+1], "decimal") == 0 )
+                {
+                    self->bRestrackDecimalFormat = true;
+                    i++;
+                }
             }
 
             self->bRestrackEnabled = true;
@@ -1183,6 +1189,7 @@ bool PrintConfiguration(struct ProcDumpConfiguration *self)
         {
             printf("%-40s%s\n", "Resource tracking:", "On");
             printf("%-40s%d\n", "Resource tracking sample rate:", self->SampleRate);
+            printf("%-40s%s\n", "Resource tracking format:", self->bRestrackDecimalFormat ? "Decimal" : "Hexadecimal");
         }
         else
         {
@@ -1284,7 +1291,7 @@ int PrintUsage()
 #ifdef __linux__
     printf("            [-gcm [<GCGeneration>: | LOH: | POH:]Memory_Usage1[,Memory_Usage2...]]\n");
     printf("            [-gcgen Generation]\n");
-    printf("            [-restrack [nodump]]\n");
+    printf("            [-restrack [nodump|decimal]]\n");
     printf("            [-sr Sample_Rate]\n");
     printf("            [-sig Signal_Number1[,Signal_Number2...]]\n");
     printf("            [-e]\n");
@@ -1315,7 +1322,7 @@ int PrintUsage()
     printf("   -ml     Memory commit threshold(s) (MB) below which to create dumps.\n");
     printf("   -gcm    [.NET] GC memory threshold(s) (MB) above which to create dumps for the specified generation or heap (default is total .NET memory usage).\n");
     printf("   -gcgen  [.NET] Create dump when the garbage collection of the specified generation starts and finishes.\n");
-    printf("   -restrack Enable memory leak tracking (malloc family of APIs). Use the nodump option to prevent dump generation and only produce restrack report(s).\n");
+    printf("   -restrack Enable memory leak tracking (malloc family of APIs). Use the nodump option to prevent dump generation and only produce restrack report(s). Use the decimal option to display allocation values in decimal instead of hexadecimal.\n");
     printf("   -sr     Sample rate when using -restrack.\n");
     printf("   -sig    Comma separated list of signal number(s) during which any signal results in a dump of the process.\n");
     printf("   -e      [.NET] Create dump when the process encounters an exception.\n");

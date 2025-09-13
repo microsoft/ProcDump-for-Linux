@@ -522,7 +522,14 @@ void* ReportLeaks(void* args)
             {
                 totalLeak += pair.totalAllocSize;
 
-                file << "+++ Leaked Allocation [allocation size: 0x" << std::hex << pair.allocSize << " count:0x" << std::hex << pair.allocCount << " total size:0x" << std::hex << pair.totalAllocSize << "]\n";
+                if(config->bRestrackDecimalFormat)
+                {
+                    file << "+++ Leaked Allocation [allocation size: " << std::dec << pair.allocSize << " count:" << std::dec << pair.allocCount << " total size:" << std::dec << pair.totalAllocSize << "]\n";
+                }
+                else
+                {
+                    file << "+++ Leaked Allocation [allocation size: 0x" << std::hex << pair.allocSize << " count:0x" << std::hex << pair.allocCount << " total size:0x" << std::hex << pair.totalAllocSize << "]\n";
+                }
 
                 for (const auto& st : callStack)
                 {
@@ -540,7 +547,14 @@ void* ReportLeaks(void* args)
             }
         }
 
-        file << "\nTotal leaked: 0x" << std::hex << totalLeak << "\n";
+        if(config->bRestrackDecimalFormat)
+        {
+            file << "\nTotal leaked: " << std::dec << totalLeak << "\n";
+        }
+        else
+        {
+            file << "\nTotal leaked: 0x" << std::hex << totalLeak << "\n";
+        }
     }
     else
     {
