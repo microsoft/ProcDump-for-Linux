@@ -7,7 +7,7 @@ TESTPROGNAME="ProcDumpTestApplication"
 TESTPROGMODE="burn"
 
 # These are all the ProcDump switches preceeding the PID
-PREFIX="-cl 20"
+PREFIX="-cl 1"
 
 # This are all the ProcDump switches after the PID
 POSTFIX=""
