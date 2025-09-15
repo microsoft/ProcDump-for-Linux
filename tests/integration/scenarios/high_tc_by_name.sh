@@ -15,6 +15,9 @@ TESTPROGMODE="tc"
 # These are all the ProcDump switches preceeding the PID
 PREFIX="-tc 50"
 
+# ProcDump should wait for the process by name (-w) instead of by PID
+PROCDUMPWAITBYNAME="true"
+
 # This are all the ProcDump switches after the PID
 POSTFIX=""
 

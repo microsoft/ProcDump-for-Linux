@@ -18,33 +18,37 @@ function runProcDumpAndValidate {
 	if [ -n "$DUMPTARGET" ]; then
 		dumpParam="$dumpDir/$DUMPTARGET"
 	fi
-	
-	# We launch procdump in background and wait for target process to start
-	echo [`date +"%T.%3N"`] Starting ProcDump
-	echo "$PROCDUMPPATH -log stdout $PREFIX -w $TESTPROGNAME" $POSTFIX $dumpParam
-	$PROCDUMPPATH -log stdout $PREFIX -w "$TESTPROGNAME" $POSTFIX $dumpParam&
-	pidPD=$!
-	echo "ProcDump PID: $pidPD"
-
-	# Wait for procdump to initialize
-	sleep 10
 
 	# Launch target process
 	echo [`date +"%T.%3N"`] Starting $TESTPROGNAME
 	if [ "$OS" = "Darwin" ]; then
 		TESTPROGPATH=$DIR/../../$TESTPROGNAME;
-	else    
+	else
 		TESTPROGPATH=$(readlink -m "$DIR/../../$TESTPROGNAME");
-	fi		
-	
+	fi
 	# Break out the arguments in case there are spaces (e.g. mem 100M)
 	read -r -a _args <<< "$TESTPROGMODE"
 	($TESTPROGPATH "${_args[@]}") &
 	pid=$!
 	echo "Test App: $TESTPROGPATH ${_args[@]}"
 	echo "PID: $pid"
+	
+	echo [`date +"%T.%3N"`] Starting ProcDump
+	if [[ "$PROCDUMPWAITBYNAME" == "true" ]]; then
+		# We launch procdump in background and use the wait by name option
+		launchMode="-w $TESTPROGNAME"
+	else
+		# We launch procdump in background and pass target PID
+		launchMode=$pid
+	fi
+	echo $launchMode
+	echo "$PROCDUMPPATH -log stdout $PREFIX $launchMode $POSTFIX $dumpParam"
+	$PROCDUMPPATH -log stdout $PREFIX $launchMode $POSTFIX $dumpParam&
+	pidPD=$!
+	echo "ProcDump PID: $pidPD"
 
 	sleep 30
+	
 	if ps -p $pidPD > /dev/null
 	then
 		echo [`date +"%T.%3N"`] Killing ProcDump: $pidPD
