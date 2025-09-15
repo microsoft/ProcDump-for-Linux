@@ -6,9 +6,6 @@ source $runProcDumpAndValidate
 TESTPROGNAME="ProcDumpTestApplication"
 TESTPROGMODE="mem"
 
-# TARGETVALUE is only used for stress-ng
-#TARGETVALUE=3M
-
 # These are all the ProcDump switches preceeding the PID
 PREFIX="-m 1"
 

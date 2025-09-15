@@ -21,8 +21,6 @@ The integration tests run using the local procdump built from source. Individual
 
 Test scripts will return `0` when they succeed and `1` when they fail.
 
-Most of the tests are written using [stress-ng](https://wiki.ubuntu.com/Kernel/References/stress-ng "stress-ng manual"), but you can write your own code to simulate the scenario you require.
-
 After writing a new test, run the `run.sh` script from $build/tests/integration and verify that no tests fail.
 
 ## Pull Requests

@@ -18,81 +18,37 @@ function runProcDumpAndValidate {
 	if [ -n "$DUMPTARGET" ]; then
 		dumpParam="$dumpDir/$DUMPTARGET"
 	fi
+	
+	# We launch procdump in background and wait for target process to start
+	echo [`date +"%T.%3N"`] Starting ProcDump
+	echo "$PROCDUMPPATH -log stdout $PREFIX -w $TESTPROGNAME" $POSTFIX $dumpParam
+	$PROCDUMPPATH -log stdout $PREFIX -w "$TESTPROGNAME" $POSTFIX $dumpParam&
+	pidPD=$!
+	echo "ProcDump PID: $pidPD"
 
-	if [ -z "$TESTPROGNAME" ]; then
-  	    echo [`date +"%T.%3N"`] Starting stress-ng
-		if [ "$RESTYPE" == "MEM" ]; then
-			stress-ng --vm 1 --vm-hang 0 --vm-bytes $TARGETVALUE -q&
-		else
-			stress-ng -c 1 -l $TARGETVALUE -q&
-		fi
-		pid=$!
-		echo "PID: $pid"
+	# Wait for procdump to initialize
+	sleep 10
 
-	    # Give test app opportunity to start and get into scenario state
-		sleep 5
-		echo [`date +"%T.%3N"`] Done waiting for stress-ng to start
+	# Launch target process
+	echo [`date +"%T.%3N"`] Starting $TESTPROGNAME
+	if [ "$OS" = "Darwin" ]; then
+		TESTPROGPATH=$DIR/../../$TESTPROGNAME;
+	else    
+		TESTPROGPATH=$(readlink -m "$DIR/../../$TESTPROGNAME");
+	fi		
+	
+	# Break out the arguments in case there are spaces (e.g. mem 100M)
+	read -r -a _args <<< "$TESTPROGMODE"
+	($TESTPROGPATH "${_args[@]}") &
+	pid=$!
+	echo "Test App: $TESTPROGPATH ${_args[@]}"
+	echo "PID: $pid"
 
-		childrenpid=""
-		if [ "$OS" = "Darwin" ]; then
-			childrenpid=$(pgrep stress-ng | grep -v "^$pid$")
-		else    
-			childrenpid=$(pidof -o $pid $(which stress-ng))
-		fi
-
-		echo "ChildrenPID: $childrenpid"
-
-		childpid=$(echo $childrenpid | cut -d " " -f1)
-		echo "ChildPID: $childpid"
-
-		# We launch procdump in background and wait for 10 secs to complete the monitoring
-		echo "$PROCDUMPPATH -log stdout $PREFIX $childpid $POSTFIX $dumpParam "
-		echo [`date +"%T.%3N"`] Starting ProcDump
-		$PROCDUMPPATH -log stdout $PREFIX $childpid $POSTFIX $dumpParam&
-		pidPD=$!
-		echo "ProcDump PID: $pidPD"
-		sleep 30
-		echo [`date +"%T.%3N"`] Killing ProcDump
-	    if ps -p $pidPD > /dev/null
-	    then
-		    kill -9 $pidPD > /dev/null
-	    fi
-	    if ps -p $childpid > /dev/null
-	    then
-		    kill -9 $childpid > /dev/null
-	    fi
-	else
-		# We launch procdump in background and wait for target process to start
-		echo [`date +"%T.%3N"`] Starting ProcDump
-		echo "$PROCDUMPPATH -log stdout $PREFIX -w $TESTPROGNAME" $POSTFIX $dumpParam
-		$PROCDUMPPATH -log stdout $PREFIX -w "$TESTPROGNAME" $POSTFIX $dumpParam&
-		pidPD=$!
-		echo "ProcDump PID: $pidPD"
-
-		# Wait for procdump to initialize
-		sleep 10
-
-		# Launch target process
-		echo [`date +"%T.%3N"`] Starting $TESTPROGNAME
-		if [ "$OS" = "Darwin" ]; then
-			TESTPROGPATH=$DIR/../../$TESTPROGNAME;
-		else    
-			TESTPROGPATH=$(readlink -m "$DIR/../../$TESTPROGNAME");
-		fi		
-		
-		# Break out the arguments in case there are spaces (e.g. mem 100M)
-		read -r -a _args <<< "$TESTPROGMODE"
-		($TESTPROGPATH "${_args[@]}") &
-		pid=$!
-		echo "Test App: $TESTPROGPATH ${_args[@]}"
-		echo "PID: $pid"
-
-		sleep 30
-	    if ps -p $pidPD > /dev/null
-	    then
-			echo [`date +"%T.%3N"`] Killing ProcDump: $pidPD
-		    kill -9 $pidPD > /dev/null
-	    fi
+	sleep 30
+	if ps -p $pidPD > /dev/null
+	then
+		echo [`date +"%T.%3N"`] Killing ProcDump: $pidPD
+		kill -9 $pidPD > /dev/null
 	fi
 
 	if ps -p $pid > /dev/null
