@@ -18,7 +18,6 @@ apt upgrade -y \
     netcat \
     gdb \
     zlib1g-dev \
-    stress-ng \
     wget \
     dpkg-dev \
     fakeroot \
