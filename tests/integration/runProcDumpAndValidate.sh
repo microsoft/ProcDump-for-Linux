@@ -48,8 +48,12 @@ function runProcDumpAndValidate {
 	pidPD=$!
 	echo "ProcDump PID: $pidPD"
 
-	# Let the test run for 30 seconds
-	sleep 30
+	# Wait up to 30s for ProcDump to exit; stop early if it finishes
+	timeout=30
+	end=$((SECONDS + timeout))
+	while ps -p "$pidPD" >/dev/null && [ $SECONDS -lt $end ]; do
+		sleep 1
+	done
 	
 	if ps -p $pidPD > /dev/null
 	then
