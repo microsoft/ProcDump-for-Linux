@@ -32,21 +32,23 @@ function runProcDumpAndValidate {
 	pid=$!
 	echo "Test App: $TESTPROGPATH ${_args[@]}"
 	echo "PID: $pid"
+
+	# Give the test program a few seconds to start and stabilize
+	sleep 3
 	
+	# Launch procdump in background using either wait by name or target PID
 	echo [`date +"%T.%3N"`] Starting ProcDump
 	if [[ "$PROCDUMPWAITBYNAME" == "true" ]]; then
-		# We launch procdump in background and use the wait by name option
 		launchMode="-w $TESTPROGNAME"
 	else
-		# We launch procdump in background and pass target PID
 		launchMode=$pid
 	fi
-	echo $launchMode
 	echo "$PROCDUMPPATH -log stdout $PREFIX $launchMode $POSTFIX $dumpParam"
 	$PROCDUMPPATH -log stdout $PREFIX $launchMode $POSTFIX $dumpParam&
 	pidPD=$!
 	echo "ProcDump PID: $pidPD"
 
+	# Let the test run for 30 seconds
 	sleep 30
 	
 	if ps -p $pidPD > /dev/null
