@@ -21,15 +21,9 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-OS=$(uname -s)
-if [ "$OS" != "Darwin" ]; then
-    if [ ! -e /usr/bin/stress-ng ]; then
-    echo "Please install stress-ng before running this script!"
-    exit 1
-    fi
-fi
 # NOTE: If you manually install .NET, this script assumes the installation directory is /usr/share/dotnet"
 DOTNET_PATH=$(which dotnet)
+OS=$(uname -s)
 
 if [ -z "$DOTNET_PATH" ] && [ "$OS" != "Darwin" ]; then
     export PATH=$PATH:/usr/share/dotnet

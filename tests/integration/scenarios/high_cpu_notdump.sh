@@ -6,9 +6,6 @@ source $runProcDumpAndValidate
 TESTPROGNAME="ProcDumpTestApplication"
 TESTPROGMODE="mem"
 
-# TARGETVALUE is only used for stress-ng
-TARGETVALUE=20
-
 # These are all the ProcDump switches preceeding the PID
 PREFIX="-c 80"
 
@@ -17,9 +14,6 @@ POSTFIX=""
 
 # Indicates whether the test should result in a dump or not
 SHOULDDUMP=false
-
-# Only applicable to stress-ng and can be either MEM or CPU
-#RESTYPE="CPU"
 
 # The dump target
 DUMPTARGET=""

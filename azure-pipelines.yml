@@ -23,6 +23,9 @@ resources:
 extends:
   template: v2/OneBranch.NonOfficial.CrossPlat.yml@obtemplates
   parameters:
+    featureFlags:
+      LinuxHostVersion:
+        Network: KS4
     globalSdl:
       tsa:
         enabled: false
@@ -59,10 +62,10 @@ extends:
 
           - template: templates/build.yaml@ProcDump
 
-          - script: |
-              cd procdump_build/tests/integration
-              ./run.sh
-            displayName: 'Run unit tests'
+          # - script: |
+          #     cd procdump_build/tests/integration
+          #     ./run.sh
+          #   displayName: 'Run unit tests'
 
         - job: "ProcDump_Build_AMD64_Run_Tests"
           pool:

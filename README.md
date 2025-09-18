@@ -55,7 +55,7 @@ Options:
    -ml     Memory commit threshold(s) (MB) below which to create dumps.
    -gcm    [.NET] GC memory threshold(s) (MB) above which to create dumps for the specified generation or heap (default is total .NET memory usage).
    -gcgen  [.NET] Create dump when the garbage collection of the specified generation starts and finishes.
-   -restrack Enable memory leak tracking (malloc family of APIs). Use the nodump option to prevent dump generation and only produce restrack report(s).
+   -restrack Enable memory leak tracking (malloc family of APIs). If used without other triggers, use 't' to manually capture a restrack report. When used with other triggers, the 'nodump' option can be used to prevent dump generation and only produce restrack report(s).
    -sr     Sample rate when using -restrack.
    -tc     Thread count threshold above which to create a dump of the process.
    -fc     File descriptor count threshold above which to create a dump of the process.
@@ -120,6 +120,14 @@ sudo procdump -c 65 -m 100 1234
 The following will create a core dump when memory usage is >= 100 MB followed by another dump when memory usage is >= 200MB.
 ```
 sudo procdump -m 100,200 1234
+```
+The following will create a memory leak report (no dumps) every time the user presses 't':
+```
+sudo procdump -restrack 1234
+```
+The following will create 3 memory leak reports (no dumps) 5 seconds apart:
+```
+sudo procdump -n 3 -s 5 -restrack nodump 1234
 ```
 The following will create a core dump and a memory leak report when memory usage is >= 100 MB
 ```
