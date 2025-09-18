@@ -467,6 +467,7 @@ void* ReportLeaks(void* args)
         // Print out the leaks
         //
         unsigned long totalLeak = 0;
+        bool missingSymbolsDetected = false;
         for (const auto& pair : groupedAllocations)
         {
             std::vector<stackFrame> callStack;
@@ -490,6 +491,12 @@ void* ReportLeaks(void* args)
                     if(sym.demangle_name != NULL)
                     {
                         frame.demangledSymbolName = sym.demangle_name;
+                    }
+
+                    // Check if symbol resolution failed
+                    if(sym.name == NULL && sym.demangle_name == NULL)
+                    {
+                        missingSymbolsDetected = true;
                     }
 
                     frame.pc = pair.stackTrace[i];
@@ -541,6 +548,14 @@ void* ReportLeaks(void* args)
         }
 
         file << "\nTotal leaked: 0x" << std::hex << totalLeak << "\n";
+
+        // Inform user if symbols couldn't be resolved
+        if(missingSymbolsDetected)
+        {
+            file << "\n[INFO] Some call stack frames could not be resolved to symbols. This may indicate missing debug symbols.\n";
+            file << "       Consider installing debug packages for the target application and its dependencies.\n";
+            Log(warn, "Some call stack frames in restrack report could not be resolved to symbols. Missing debug symbols may be the cause.");
+        }
     }
     else
     {
