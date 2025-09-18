@@ -24,9 +24,10 @@
 #include <stdio.h>
 #include <sys/utsname.h>
 #include <errno.h>
-#include <stdio.h>
 #include <sys/types.h>
 #include <dirent.h>
+#include <termios.h>
+#include <fcntl.h>
 
 //
 // Minimum kernel version for ProcDump to run
@@ -132,6 +133,15 @@ int recv_all(int socket, void* buffer, size_t length);
 pid_t gettid() noexcept;
 unsigned long GetCoreDumpFilter(int pid);
 bool SetCoreDumpFilter(int pid, unsigned long filter);
+
+struct TerminalState
+{
+    struct termios termios;
+    int fileDescriptorFlags;
+};
+
+TerminalState DisableTerminalCanonicalMode();
+void RestoreTerminalState(TerminalState state);
 
 #endif // GENHELPERS_H
 

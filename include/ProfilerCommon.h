@@ -23,7 +23,8 @@ enum TriggerType
     Exception,
     GCThreshold,
     GCGeneration,
-    Restrack
+    Restrack,
+    RestrackManual,
 };
 
 #endif // PROFILERCOMMON_H
