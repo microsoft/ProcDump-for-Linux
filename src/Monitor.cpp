@@ -529,7 +529,6 @@ int CreateMonitorThreads(struct ProcDumpConfiguration *self)
 {
     int rc = 0;
     self->nThreads = 0;
-    bool tooManyTriggers = false;
 
     // create threads
     if (MonitorDotNet(self) == true)
@@ -550,7 +549,7 @@ int CreateMonitorThreads(struct ProcDumpConfiguration *self)
         }
     }
 
-    if (self->MemoryThreshold != NULL && !tooManyTriggers && self->bMonitoringGCMemory == false)
+    if (self->MemoryThreshold != NULL && self->bMonitoringGCMemory == false)
     {
         if ((rc = CreateMonitorThread(self, Commit, CommitMonitoringThread, (void *)self)) != 0 )
         {
@@ -559,7 +558,7 @@ int CreateMonitorThreads(struct ProcDumpConfiguration *self)
         }
     }
 
-    if (self->ThreadThreshold != -1 && !tooManyTriggers)
+    if (self->ThreadThreshold != -1)
     {
         if ((rc = CreateMonitorThread(self, ThreadCount, ThreadCountMonitoringThread, (void *)self)) != 0 )
         {
@@ -568,7 +567,7 @@ int CreateMonitorThreads(struct ProcDumpConfiguration *self)
         }
     }
 
-    if (self->FileDescriptorThreshold != -1 && !tooManyTriggers)
+    if (self->FileDescriptorThreshold != -1)
     {
         if ((rc = CreateMonitorThread(self, FileDescriptorCount, FileDescriptorCountMonitoringThread, (void *)self)) != 0 )
         {
@@ -577,7 +576,7 @@ int CreateMonitorThreads(struct ProcDumpConfiguration *self)
         }
     }
 
-    if (self->SignalCount > 0 && !tooManyTriggers)
+    if (self->SignalCount > 0)
     {
         if ((rc = CreateMonitorThread(self, Signal, SignalMonitoringThread, (void *)self)) != 0 )
         {
