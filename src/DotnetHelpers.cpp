@@ -32,15 +32,27 @@ bool IsCoreClrProcess(pid_t pid, char** socketName)
 
     // If $TMPDIR is set, use it as the path, otherwise we use /tmp
     // per https://github.com/dotnet/diagnostics/blob/master/documentation/design-docs/ipc-protocol.md
+    // Use pattern "dotnet-diagnostic-{pid}-" to ensure exact PID matching (issue #283)
     tmpFolder = GetSocketPath(const_cast<char*>("dotnet-diagnostic-"), pid, 0);
     if(tmpFolder == NULL)
     {
         return false;
     }
+    
+    // Append dash to ensure exact PID match and prevent matching PIDs that start with the same digits
+    int newLen = strlen(tmpFolder) + 2; // +1 for dash, +1 for null terminator
+    char* exactPattern = (char*) malloc(newLen);
+    if(exactPattern == NULL)
+    {
+        return false;
+    }
+    snprintf(exactPattern, newLen, "%s-", tmpFolder);
+    free(tmpFolder);
+    tmpFolder = exactPattern;
 
     // Enumerate all open domain sockets exposed from the process. If one
     // exists by the following prefix, we assume its a .NET process:
-    //    dotnet-diagnostic-{%d:PID}
+    //    dotnet-diagnostic-{%d:PID}-
     // The sockets are found in /proc/net/unix
     procFile = fopen("/proc/net/unix", "r");
     if(procFile != NULL)
