@@ -47,7 +47,7 @@ echo "SOCKETPATH: "$SOCKETPATH
 
 wget -O /dev/null http://localhost:5032/memincrease
 
-waitforndumps 3 *TestWebApi_*gc_size_* "COUNT"
+waitforndumps 3 "*TestWebApi_*gc_size_*" "COUNT"
 
 sudo pkill -9 procdump
 

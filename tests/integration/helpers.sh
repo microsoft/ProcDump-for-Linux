@@ -106,13 +106,15 @@ function waitforndumps {
   local dumppattern=$2
   local -n result=$3
 
-  for i in {1..15}; do
-      result=( $(ls $dumppattern | wc -l) )
-      if [[ "$result" -ge $expecteddumps ]]; then
-          echo "[script] Dump was written..."
-          break
-      fi
-      echo "[script] Waiting for dump to be written..."
-      sleep 1
+  for i in {1..30}; do
+    files=( $dumppattern )
+    result=${#files[@]}
+    if [ "$result" -ge "$expecteddumps" ]; then
+        echo "[script] Dump was written..."
+        break
+    fi
+    echo "[script] Waiting for dump to be written..."
+    sleep 1
   done
 }
+

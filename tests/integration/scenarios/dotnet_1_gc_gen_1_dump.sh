@@ -47,7 +47,7 @@ echo "SOCKETPATH: "$SOCKETPATH
 
 wget -O /dev/null http://localhost:5032/fullgc
 
-waitforndumps 2 *TestWebApi_*gc_gen_* "COUNT"
+waitforndumps 2 "*TestWebApi_*gc_gen_*" "COUNT"
 
 sudo pkill -9 procdump
 
