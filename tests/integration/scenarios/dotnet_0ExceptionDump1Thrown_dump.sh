@@ -48,10 +48,32 @@ if [ $SOCKETPATH -eq -1 ]; then
 fi
 echo "SOCKETPATH: "$SOCKETPATH
 
+# wait for profile to be loaded
+for i in {1..15}; do
+    PROF="$(cat /proc/${TESTCHILDPID}/maps | awk '{print $6}' | grep '\procdumpprofiler.so' | uniq)"
+    if [[ "$PROF" == *"procdumpprofiler.so" ]]; then
+        echo "[script] Profiler was loaded..."
+        break
+    fi
+    echo "[script] Waiting for profiler to be loaded..."
+    sleep 1
+done
+
 wget http://localhost:5032/throwinvalidoperation
 
+# wait for dump to be created
+for i in {1..15}; do
+    COUNT=( $(ls *TestWebApi_*Exception* | wc -l) )
+    if [[ "$COUNT" -eq 1 ]]; then
+        echo "[script] Dump was written..."
+        break
+    fi
+    echo "[script] Waiting for dump to be written..."
+    sleep 1
+done
+
 sudo pkill -9 procdump
-COUNT=( $(ls *TestWebApi_*Exception* | wc -l) )
+
 if [ -S $SOCKETPATH ];
 then
     rm $SOCKETPATH
