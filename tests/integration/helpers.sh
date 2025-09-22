@@ -84,4 +84,33 @@ function waitforprocdumpsocket {
   sudo ls /tmp/procdump
   echo "ProcDump .NET status socket found"
   result=$socketpath
+
+  # wait for profile to be loaded
+  for i in {1..15}; do
+      PROF="$(cat /proc/${testchildpid}/maps | awk '{print $6}' | grep '\procdumpprofiler.so' | uniq)"
+      if [[ "$PROF" == *"procdumpprofiler.so" ]]; then
+          echo "[script] Profiler was loaded..."
+          break
+      fi
+      echo "[script] Waiting for profiler to be loaded..."
+      sleep 1
+  done
+}
+
+#
+# wait for dump to be created/written
+#
+function waitfordump {
+  local dumppattern=$1
+  local -n result=$2
+
+  for i in {1..15}; do
+      result=( $(ls $dumppattern | wc -l) )
+      if [[ "$result" -eq 1 ]]; then
+          echo "[script] Dump was written..."
+          break
+      fi
+      echo "[script] Waiting for dump to be written..."
+      sleep 1
+  done
 }
