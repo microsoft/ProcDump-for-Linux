@@ -251,6 +251,8 @@ int LoadProfiler(pid_t pid, char* clientData)
 //--------------------------------------------------------------------
 int InjectProfiler(pid_t pid, char* clientData)
 {
+    Trace("InjectProfiler: Starting injection of profiler into target process %d", pid);
+
     int ret = ExtractProfiler();
     if(ret != 0)
     {
@@ -266,6 +268,8 @@ int InjectProfiler(pid_t pid, char* clientData)
         Trace("InjectProfiler: failed to load profiler into target process.");
         return ret;
     }
+
+    Trace("InjectProfiler: Successfully injected profiler into target process %d", pid);
 
     return 0;
 }

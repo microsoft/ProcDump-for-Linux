@@ -50,8 +50,10 @@ echo "SOCKETPATH: "$SOCKETPATH
 
 wget http://localhost:5032/throwinvalidoperation
 
+waitforndumps 1 "*TestWebApi_*Exception*" "COUNT"
+
 sudo pkill -9 procdump
-COUNT=( $(ls *TestWebApi_*Exception* | wc -l) )
+
 if [ -S $SOCKETPATH ];
 then
     rm $SOCKETPATH

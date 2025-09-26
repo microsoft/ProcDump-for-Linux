@@ -1990,6 +1990,8 @@ void *WaitForProfilerCompletion(void *thread_args /* struct ProcDumpConfiguratio
             return NULL;
         }
 
+        Trace("WaitForProfilerCompletion: Connection was accepted");
+
         // packet looks like this: <payload_len><[byte] 0=failure, 1=success><[uint_32] dumpfile_path_len><[char*]Dumpfile path>
         int payloadLen = 0;
         if(recv_all(s2, &payloadLen, sizeof(int))==-1)

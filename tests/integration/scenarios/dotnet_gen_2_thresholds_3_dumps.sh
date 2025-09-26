@@ -47,8 +47,10 @@ echo "SOCKETPATH: "$SOCKETPATH
 
 wget -O /dev/null http://localhost:5032/memincrease
 
+waitforndumps 3 "*TestWebApi_*gc_size_*" "COUNT"
+
 sudo pkill -9 procdump
-COUNT=( $(ls *TestWebApi_*gc_size_* | wc -l) )
+
 if [ -S $SOCKETPATH ];
 then
     rm $SOCKETPATH

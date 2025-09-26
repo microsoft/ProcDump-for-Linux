@@ -307,6 +307,9 @@ HRESULT STDMETHODCALLTYPE CorProfiler::InitializeForAttach(IUnknown *pCorProfile
     // Create the health check thread which periodically pings procdump to see if its still alive
     pthread_create(&healthThread, NULL, HealthThread, this);
 
+    // The following output is used in integration tests (tests/integration/helpers.sh) 
+    LOG(TRACE) << "CorProfiler::InitializeForAttach: Initialization complete (procdumppid=" << procDumpPid << ",targetpid=" << getpid() << ")";
+
     LOG(TRACE) << "CorProfiler::InitializeForAttach: Exit";
     return S_OK;
 }

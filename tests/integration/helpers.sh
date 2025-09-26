@@ -84,4 +84,37 @@ function waitforprocdumpsocket {
   sudo ls /tmp/procdump
   echo "ProcDump .NET status socket found"
   result=$socketpath
+
+  # wait for profile to be initialized
+  search="Initialization complete (procdumppid=${procdumpchildpid},targetpid=${testchildpid})"
+  (timeout "10s" tail -F -n +1 "/var/tmp/procdumpprofiler.log" &) | grep -q "$search"
+  if [ $? -eq 0 ]; then
+      result=$socketpath
+      return
+  else
+      echo "Timeout reached. Unable to find '$search' in '/var/tmp/procdumpprofiler.log'"
+      result=-1
+      return
+  fi
 }
+
+#
+# wait for at least N dumps with a certain pattern name to be created/written
+#
+function waitforndumps {
+  local expecteddumps=$1
+  local dumppattern=$2
+  local -n result=$3
+
+  for i in {1..30}; do
+    files=( $dumppattern )
+    result=${#files[@]}
+    if [ "$result" -ge "$expecteddumps" ]; then
+        echo "[script] Dump was written..."
+        break
+    fi
+    echo "[script] Waiting for dump to be written..."
+    sleep 1
+  done
+}
+
