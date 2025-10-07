@@ -362,7 +362,7 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   add_dependencies(procdump_ebpf libbpf)
 
   add_custom_command(OUTPUT procdump_ebpf.o
-                    COMMAND "${CLANG}" -nostdinc -isystem `gcc -print-file-name=include` ${CLANG_INCLUDES} ${CLANG_DEFINES} -O2 ${CLANG_OPTIONS} -target bpf -fno-stack-protector -c "${procdump_ebpf_SOURCE_DIR}/procdump_ebpf.c" -o "procdump_ebpf.o" && bpftool gen object procdump.ebpf.o procdump_ebpf.o && bpftool gen skeleton "procdump.ebpf.o" name "procdump_ebpf" > "procdump_ebpf.skel.h"
+                    COMMAND "${CLANG}" -nostdinc -isystem `gcc -print-file-name=include` ${CLANG_INCLUDES} ${CLANG_DEFINES} -O2 ${CLANG_OPTIONS} -target bpf -fno-stack-protector -c "${procdump_ebpf_SOURCE_DIR}/procdump_ebpf.c" -o "procdump_ebpf.o" && bpftool gen object procdump.ebpf.o procdump_ebpf.o && bpftool gen skeleton "procdump.ebpf.o" name "procdump_ebpf" > "procdump_ebpf.skel.h" && bash "${CMAKE_SOURCE_DIR}/fix_skeleton.sh"
                     COMMENT "Building EBPF object procdump_ebpf.o"
                     DEPENDS ${procdump_ebpf_SOURCE_DIR}/procdump_ebpf.c
                     )
