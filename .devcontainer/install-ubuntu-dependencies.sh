@@ -76,15 +76,8 @@ ln -s /usr/local/sbin/bpftool /usr/sbin/bpftool
 wget https://github.com/debbuild/debbuild/releases/download/22.02.1/debbuild_22.02.1-0ubuntu20.04_all.deb \
     && dpkg -i debbuild_22.02.1-0ubuntu20.04_all.deb
 
-if [[ "$arch" == "aarch64" ]]; then
-    wget https://dot.net/v1/dotnet-install.sh 
-    chmod +x dotnet-install.sh
-    ./dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet
-else
-    # Not ARM64, we can install dotnet the normal way.
-    # install .NET 8 for signing process and integration tests
-    wget https://packages.microsoft.com/config/debian/11/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
-    dpkg -i packages-microsoft-prod.deb
-    apt update
-    apt install dotnet-sdk-8.0
-fi
+# Install .NET SDK
+cd ~
+wget https://dot.net/v1/dotnet-install.sh 
+chmod +x dotnet-install.sh
+./dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet
