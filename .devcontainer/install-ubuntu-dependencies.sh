@@ -13,7 +13,7 @@ apt upgrade -y \
     cmake \
     iputils-ping \
     libcurl4 \
-    libicu70 \
+    libicu67 \
     libunwind8 \
     netcat \
     gdb \
@@ -30,10 +30,43 @@ apt upgrade -y \
     llvm \
     build-essential \
     libbpf-dev \
-    sudo
+    gnupg \
+    libelf-dev \
+    libssl-dev
+
+# Install later version of clang needed for libbpf build
+wget https://apt.llvm.org/llvm.sh
+chmod +x llvm.sh
+./llvm.sh 12
+
+# Build openssl3
+wget https://www.openssl.org/source/openssl-3.1.2.tar.gz
+tar xzf openssl-3.1.2.tar.gz
+cd openssl-3.1.2
+./config --prefix=/usr/local/openssl-3
+make
+make install
+
+arch=$(uname -m)
 
 # Build and install bpftool
+update-alternatives --install /usr/bin/clang clang /usr/bin/clang-12 200
+update-alternatives --config clang
+
+export CFLAGS="$CFLAGS -I/usr/local/openssl-3/include"
+
+if [[ "$arch" == "aarch64" ]]; then
+    export LDFLAGS="-L/usr/local/openssl-3/lib -lssl -lcrypto $LDFLAGS"
+    export PKG_CONFIG_PATH=/usr/local/openssl-3/lib/pkgconfig:$PKG_CONFIG_PATH    
+    export LD_LIBRARY_PATH=/usr/local/openssl-3/lib:$LD_LIBRARY_PATH    
+else
+    export LDFLAGS="-L/usr/local/openssl-3/lib64 -lssl -lcrypto $LDFLAGS"
+    export PKG_CONFIG_PATH=/usr/local/openssl-3/lib64/pkgconfig:$PKG_CONFIG_PATH    
+    export LD_LIBRARY_PATH=/usr/local/openssl-3/lib64:$LD_LIBRARY_PATH
+fi
+
 rm -rf /usr/sbin/bpftool
+cd ~
 git clone --recurse-submodules https://github.com/libbpf/bpftool.git
 cd bpftool/src
 make install
@@ -43,7 +76,6 @@ ln -s /usr/local/sbin/bpftool /usr/sbin/bpftool
 wget https://github.com/debbuild/debbuild/releases/download/22.02.1/debbuild_22.02.1-0ubuntu20.04_all.deb \
     && dpkg -i debbuild_22.02.1-0ubuntu20.04_all.deb
 
-arch=$(uname -m)
 if [[ "$arch" == "aarch64" ]]; then
     wget https://dot.net/v1/dotnet-install.sh 
     chmod +x dotnet-install.sh
@@ -51,6 +83,8 @@ if [[ "$arch" == "aarch64" ]]; then
 else
     # Not ARM64, we can install dotnet the normal way.
     # install .NET 8 for signing process and integration tests
-    apt install -y dotnet-runtime-8.0
-    apt install -y dotnet-sdk-8.0
+    wget https://packages.microsoft.com/config/debian/11/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
+    dpkg -i packages-microsoft-prod.deb
+    apt update
+    apt install dotnet-sdk-8.0
 fi
