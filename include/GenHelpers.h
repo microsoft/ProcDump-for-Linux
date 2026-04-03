@@ -123,6 +123,7 @@ uint16_t* GetUint16(char* buffer);
 char* GetPath(char* lineBuf);
 FILE *popen2(const char *command, const char *type, pid_t *pid);
 char *sanitize(char *processName);
+bool validateCoreDumpPath(const char *path);
 int StringToGuid(char* szGuid, struct CLSID* pGuid);
 int GetHex(char* szStr, int size, void* pResult);
 bool createDir(const char *dir, mode_t perms);

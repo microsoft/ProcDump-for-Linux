@@ -350,6 +350,36 @@ char *sanitize(char * processName)
 
 //--------------------------------------------------------------------
 //
+// validateCoreDumpPath - validate that a core dump file path contains
+// only safe characters to prevent shell injection when passed to gcore
+// via popen2/bash -c.
+//
+// Allowed: alphanumeric, '/', '.', '_', '-', ' '
+//
+// Returns: true if valid, false if path contains disallowed characters
+//
+//--------------------------------------------------------------------
+bool validateCoreDumpPath(const char *path)
+{
+    if(path == NULL)
+    {
+        return false;
+    }
+
+    for(int i = 0; path[i] != '\0'; i++)
+    {
+        char c = path[i];
+        if(!isalnum(c) && c != '/' && c != '.' && c != '_' && c != '-' && c != ' ')
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+//--------------------------------------------------------------------
+//
 // StringToGuid
 //
 // Convert string representation of GUID to a GUID

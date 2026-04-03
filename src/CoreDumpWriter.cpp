@@ -256,8 +256,15 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
         return NULL;
     }
 
-    // assemble the command
-    if(snprintf(command, BUFFER_LENGTH, "gcore -o %s %d 2>&1", coreDumpFileName, pid) < 0)
+    // validate core dump file path to prevent shell injection
+    if(!validateCoreDumpPath(coreDumpFileName))
+    {
+        Log(error, "Invalid characters in core dump file path: %s", coreDumpFileName);
+        return NULL;
+    }
+
+    // assemble the command (single-quoted path to handle spaces safely)
+    if(snprintf(command, BUFFER_LENGTH, "gcore -o '%s' %d 2>&1", coreDumpFileName, pid) < 0)
     {
         Log(error, INTERNAL_ERROR);
         Trace("WriteCoreDumpInternal: failed sprintf gcore command");
