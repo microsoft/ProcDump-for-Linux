@@ -221,7 +221,7 @@ char* WriteCoreDump(struct CoreDumpWriter *self)
 // --------------------------------------------------------------------------------------
 char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
 {
-    char command[BUFFER_LENGTH];
+    char pidStr[32];
     char ** outputBuffer;
     char lineBuffer[BUFFER_LENGTH];
     char coreDumpFileName[PATH_MAX+1] = {0};
@@ -256,20 +256,21 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
         return NULL;
     }
 
-    // validate core dump file path to prevent shell injection
+    // validate core dump file path
     if(!validateCoreDumpPath(coreDumpFileName))
     {
         Log(error, "Invalid characters in core dump file path: %s", coreDumpFileName);
         return NULL;
     }
 
-    // assemble the command (single-quoted path to handle spaces safely)
-    if(snprintf(command, BUFFER_LENGTH, "gcore -o '%s' %d 2>&1", coreDumpFileName, pid) < 0)
+    // assemble the argument vector for gcore (no shell to avoid command injection)
+    if(snprintf(pidStr, sizeof(pidStr), "%d", pid) < 0)
     {
         Log(error, INTERNAL_ERROR);
-        Trace("WriteCoreDumpInternal: failed sprintf gcore command");
+        Trace("WriteCoreDumpInternal: failed sprintf pid");
         exit(-1);
     }
+    const char *gcoreArgv[] = {"gcore", "-o", coreDumpFileName, pidStr, NULL};
 
     // check if we're allowed to write into the target directory
     if(access(self->Config->CoreDumpPath, W_OK) < 0)
@@ -310,7 +311,7 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
 
         // Oterwise, we use gcore dump generation   TODO@FUTURE: We might consider adding a forcegcore flag in cases where
         // someone wants to use gcore even for .NET processes.
-        commandPipe = popen2(command, "r", &gcorePid);
+        commandPipe = popen2_exec(gcoreArgv, "r", &gcorePid);
         self->Config->gcorePid = gcorePid;
 
         if(commandPipe == NULL)

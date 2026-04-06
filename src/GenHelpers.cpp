@@ -250,31 +250,30 @@ char* GetPath(char* lineBuf)
 
 //--------------------------------------------------------------------
 //
-// popen2 - alternate popen that surfaces the pid of the spawned process
+// popen2_exec - alternate popen that surfaces the pid of the spawned process
+//               and invokes the command directly via execvp (no shell).
 //
-// Parameters: command (const char *) - the string containing the command to execute in the child thread
+// Parameters: argv (const char *const []) - NULL-terminated argument vector
 //             type (const char *) - either "r" for read or "w" for write
-//             pid (pidt_t *) - out variable containing the pid of the spawned process
+//             pid (pid_t *) - out variable containing the pid of the spawned process
 //
-// Returns: FILE* pointing to the r or w of the pip between this thread and the spawned
+// Returns: FILE* pointing to the r or w of the pipe between this thread and the spawned
 //
 //--------------------------------------------------------------------
-FILE *popen2(const char *command, const char *type, pid_t *pid)
+FILE *popen2_exec(const char *const argv[], const char *type, pid_t *pid)
 {
-    // per man page: "...opens a process by creating a pipe, forking, and invoking the shell..."
     int pipefd[2]; // 0 -> read, 1 -> write
     pid_t childPid;
 
     if ((pipe(pipefd)) == -1) {
         Log(error, INTERNAL_ERROR);
-        Trace("popen2: unable to open pipe");
+        Trace("popen2_exec: unable to open pipe");
         exit(-1);
     }
 
-    // fork and then ensure we have the correct end of the pipe open
     if ((childPid = fork()) == -1) {
         Log(error, INTERNAL_ERROR);
-        Trace("popen2: unable to fork process");
+        Trace("popen2_exec: unable to fork process");
         exit(-1);
     }
 
@@ -291,8 +290,8 @@ FILE *popen2(const char *command, const char *type, pid_t *pid)
             dup2(pipefd[0], STDIN_FILENO); // redirect pipe read to stdin
         }
 
-        execl("/bin/bash", "bash", "-c", command, (char *)NULL); // won't return
-        return NULL; // will never be hit; just for static analyzers
+        execvp(argv[0], (char *const *)argv); // won't return on success
+        _exit(127); // exec failed
     } else {
         // parent
         setpgid(childPid, childPid); // give the child and descendants their own pgid so we can terminate gcore separately
@@ -305,7 +304,6 @@ FILE *popen2(const char *command, const char *type, pid_t *pid)
             close(pipefd[0]);
             return fdopen(pipefd[1], "w");
         }
-
     }
 #if (__GNUC__ >= 13)
 #pragma GCC diagnostic push
@@ -542,7 +540,7 @@ bool isBinaryOnPath(const char *binary){
             free(path);
             return true;
         }
-        
+
         directory = strtok(NULL, ":");
     }
 
@@ -757,7 +755,7 @@ TerminalState DisableTerminalCanonicalMode()
     modifiedTermios = originalState.termios;
     modifiedTermios.c_lflag &= ~(ICANON | ECHO);
     tcsetattr(STDIN_FILENO, TCSANOW, &modifiedTermios);
-    
+
     // Backups the current file descriptor flags and sets the file descriptor to non-blocking mode
     // so that getchar() does not block.
     originalState.fileDescriptorFlags = fcntl(STDIN_FILENO, F_GETFL, 0);
@@ -776,5 +774,5 @@ TerminalState DisableTerminalCanonicalMode()
 void RestoreTerminalState(TerminalState state)
 {
     tcsetattr(STDIN_FILENO, TCSANOW, &state.termios);
-    fcntl(STDIN_FILENO, F_SETFL, state.fileDescriptorFlags);   
+    fcntl(STDIN_FILENO, F_SETFL, state.fileDescriptorFlags);
 }
