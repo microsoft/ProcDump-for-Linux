@@ -302,7 +302,7 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
 
   ExternalProject_Add(libbpf
       GIT_REPOSITORY https://github.com/libbpf/libbpf.git
-      GIT_TAG v1.2.2
+      GIT_TAG v1.7.0
       PREFIX ./libbpf
       CONFIGURE_COMMAND ""
       BUILD_COMMAND cd ../libbpf/src && bash -c "CFLAGS=\"-g -O2 -Werror -Wall -fPIC\" make"
