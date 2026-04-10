@@ -82,16 +82,13 @@ void* ThreadProc(void *input)
 
 // CPU stress function - consumes specified percentage of CPU
 void stress_cpu(int target_cpu_percentage) {
-    struct timespec work_time, sleep_time;
+    struct timespec sleep_time;
     long work_usec, sleep_usec;
     
     // Calculate work and sleep times for desired CPU percentage
     // Use 10ms cycle time for good responsiveness
     work_usec = (10000 * target_cpu_percentage) / 100;
     sleep_usec = 10000 - work_usec;
-    
-    work_time.tv_sec = work_usec / 1000000;
-    work_time.tv_nsec = (work_usec % 1000000) * 1000;
     
     sleep_time.tv_sec = sleep_usec / 1000000;
     sleep_time.tv_nsec = (sleep_usec % 1000000) * 1000;

@@ -1605,7 +1605,7 @@ void* RestrackManualTriggerThread(void *thread_args /* struct ProcDumpConfigurat
 #ifdef __linux__
     struct ProcDumpConfiguration *config = (struct ProcDumpConfiguration *)thread_args;
 
-    struct TerminalState originalTerminalState = {0};
+    struct TerminalState originalTerminalState = {{}};
     auto_free struct CoreDumpWriter *writer = NULL;
     std::vector<pthread_t> leakReportThreads;
     int rc = 0;
