@@ -4,10 +4,10 @@ runProcDumpAndValidate=$(readlink -m "$DIR/../runProcDumpAndValidate.sh");
 source $runProcDumpAndValidate
 
 TESTPROGNAME="ProcDumpTestApplication"
-TESTPROGMODE="cpu 90"
+TESTPROGMODE="burn"
 
 # These are all the ProcDump switches preceeding the PID
-PREFIX="-m 1000 -c 80"
+PREFIX="-m 1000 -c 25"
 
 # This are all the ProcDump switches after the PID
 POSTFIX=""

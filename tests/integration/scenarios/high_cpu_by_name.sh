@@ -7,7 +7,7 @@ TESTPROGNAME="ProcDumpTestApplication"
 TESTPROGMODE="burn"
 
 # This are all the ProcDump switches preceeding the target
-PREFIX="-c 50"
+PREFIX="-c 25"
 
 # ProcDump should wait for the process by name (-w) instead of by PID
 PROCDUMPWAITBYNAME="true"

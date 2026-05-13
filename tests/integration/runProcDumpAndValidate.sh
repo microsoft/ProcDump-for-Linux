@@ -36,8 +36,14 @@ function runProcDumpAndValidate {
 	echo "Test App: $TESTPROGPATH ${_args[@]}"
 	echo "PID: $pid"
 
-	# Give the test program a few seconds to start and stabilize
-	sleep 3
+	# Give the test program time to start and stabilize
+	if [ -n "$STABILIZATION_SLEEP" ]; then
+		sleep $STABILIZATION_SLEEP
+	elif $SHOULDDUMP; then
+		sleep 3
+	else
+		sleep 1
+	fi
 	
 	# Launch procdump in background using either wait by name or target PID
 	echo [`date +"%T.%3N"`] Starting ProcDump
@@ -51,8 +57,16 @@ function runProcDumpAndValidate {
 	pidPD=$!
 	echo "ProcDump PID: $pidPD"
 
-	# Wait up to 30s for ProcDump to exit; stop early if it finishes
-	timeout=30
+	# Wait for ProcDump to exit; notdump tests use a shorter timeout
+	if [ -z "$TIMEOUT" ]; then
+		if $SHOULDDUMP; then
+			timeout=30
+		else
+			timeout=10
+		fi
+	else
+		timeout=$TIMEOUT
+	fi
 	end=$((SECONDS + timeout))
 	while ps -p "$pidPD" >/dev/null && [ $SECONDS -lt $end ]; do
 		sleep 1

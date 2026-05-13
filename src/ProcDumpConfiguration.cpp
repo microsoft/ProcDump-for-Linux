@@ -390,6 +390,7 @@ struct ProcDumpConfiguration * CopyProcDumpConfiguration(struct ProcDumpConfigur
         copy->SampleRate = self->SampleRate;
         copy->CoreDumpMask = self->CoreDumpMask;
         copy->bUseGcore = self->bUseGcore;
+        copy->bOverwriteExisting = self->bOverwriteExisting;
         copy->bMemoryTriggerBelowValue = self->bMemoryTriggerBelowValue;
         copy->MemoryThresholdCount = self->MemoryThresholdCount;
         copy->bMonitoringGCMemory = self->bMonitoringGCMemory;

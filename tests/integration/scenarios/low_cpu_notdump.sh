@@ -6,8 +6,11 @@ source $runProcDumpAndValidate
 TESTPROGNAME="ProcDumpTestApplication"
 TESTPROGMODE="burn"
 
+# burn needs extra warm-up so lifetime-average CPU exceeds the -cl threshold
+STABILIZATION_SLEEP=5
+
 # These are all the ProcDump switches preceeding the PID
-PREFIX="-cl 20"
+PREFIX="-cl 10"
 
 # This are all the ProcDump switches after the PID
 POSTFIX=""

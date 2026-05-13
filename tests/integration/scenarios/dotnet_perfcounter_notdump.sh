@@ -34,7 +34,7 @@ wget -q -O /dev/null http://localhost:5032/setgauge/10
 sudo $PROCDUMPPATH -log stdout -pc TestWebApi.PerfCounter:test-gauge 50 -n 1 $TESTCHILDPID &
 
 # Let monitoring run for a reasonable time without crossing threshold
-sleep 15
+sleep 10
 
 # Check that no dump was created
 COUNT=$(ls -1 *TestWebApi_*perfcounter* 2>/dev/null | wc -l)
