@@ -3,7 +3,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 
 function runProcDumpAndValidate {
 	DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )";
-	PROCDUMPPATH="$DIR/../../procdump";
+	PROCDUMPPATH="${PROCDUMPPATH:-$DIR/../../procdump}";
 	GDBSCRIPT="$DIR/validate_dump.gdb"
 
 	OS=$(uname -s)

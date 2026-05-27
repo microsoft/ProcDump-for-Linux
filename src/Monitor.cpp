@@ -295,7 +295,7 @@ void MonitorProcesses(struct ProcDumpConfiguration *self)
         monitoredProcessMap[config->ProcessId].active = false;
         pthread_mutex_unlock(&activeConfigurationsMutex);
         FreeProcDumpConfiguration(config);
-        free(config);
+        delete config;
     }
     else
     {
@@ -474,7 +474,7 @@ void MonitorProcesses(struct ProcDumpConfiguration *self)
         }
         pthread_mutex_unlock(&activeConfigurationsMutex);
 
-        free(target_config);
+        delete target_config;
     }
 }
 
