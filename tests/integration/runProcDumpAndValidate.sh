@@ -80,7 +80,7 @@ function runProcDumpAndValidate {
 
 	# Determine if this is a native (non-.NET) test that expects dumps
 	isNativeTest=false
-	if [[ "$TESTPROGNAME" == "ProcDumpTestApplication" ]] && $SHOULDDUMP; then
+	if [[ "$TESTPROGNAME" == "ProcDumpTestApplication" ]] && $SHOULDDUMP && [[ "$OS" != "Darwin" ]]; then
 		isNativeTest=true
 	fi
 
@@ -108,7 +108,13 @@ function runProcDumpAndValidate {
 		foundFile=$(find "$dumpDir" -mindepth 1 -name "*.restrack" -print -quit)
 		if [[ -n $foundFile ]]; then
 			pwd
-			if [ $(stat -c%s "$foundFile") -gt 19 ]; then
+			local _fsize
+			if [[ "$OS" == "Darwin" ]]; then
+				_fsize=$(stat -f%z "$foundFile")
+			else
+				_fsize=$(stat -c%s "$foundFile")
+			fi
+			if [ $_fsize -gt 19 ]; then
 				exit 0
 			fi
 		fi

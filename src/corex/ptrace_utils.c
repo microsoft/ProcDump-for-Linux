@@ -1,7 +1,9 @@
 /*
  * ptrace_utils.c - ptrace attach/detach and register reading
  */
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>

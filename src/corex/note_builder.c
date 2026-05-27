@@ -6,7 +6,9 @@
  *   name (padded to 4-byte alignment)
  *   desc (padded to 4-byte alignment)
  */
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

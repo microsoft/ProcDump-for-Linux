@@ -17,6 +17,7 @@
 #include <sys/types.h>
 #include <elf.h>
 #include <sys/procfs.h>
+#include <sys/ptrace.h>
 
 #if defined(__x86_64__)
 

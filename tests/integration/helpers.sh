@@ -54,7 +54,7 @@ function waitforprocdumpsocket {
 
   ps -A -l
 
-  if [[ -v TMPDIR ]];
+  if [[ -n "${TMPDIR:-}" ]];
   then
       tmpfolder=$TMPDIR
   else
@@ -136,8 +136,15 @@ function validatedumpsize {
     return 1
   fi
 
-  local corex_size=$(stat -c%s "$corex_dump")
-  local gcore_size=$(stat -c%s "$gcore_dump")
+  local corex_size
+  local gcore_size
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    corex_size=$(stat -f%z "$corex_dump")
+    gcore_size=$(stat -f%z "$gcore_dump")
+  else
+    corex_size=$(stat -c%s "$corex_dump")
+    gcore_size=$(stat -c%s "$gcore_dump")
+  fi
 
   if [ "$gcore_size" -eq 0 ]; then
     echo "[validate] ERROR: gcore reference dump is empty"

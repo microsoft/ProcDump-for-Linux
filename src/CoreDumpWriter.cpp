@@ -240,7 +240,8 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
     gcorePrefixName = GetCoreDumpPrefixName(self->Config->ProcessId, name, self->Config->CoreDumpPath, self->Config->CoreDumpName, self->Type);
 
     // assemble filename
-    // On Linux, gcore appends .<pid> to the outputfile but on macOS it doesn't
+    // On Linux, gcore appends .<pid> to the output file; corex uses the full path directly.
+    // For the "already exists" check we need the final filename (with .pid on Linux).
 #ifdef __linux__
     if(snprintf(coreDumpFileName, PATH_MAX, "%s", gcorePrefixName) < 0)
 #else
@@ -252,11 +253,20 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
         exit(-1);
     }
 
-    // If the file already exists and the overwrite flag has not been set we fail
-    if(access(coreDumpFileName, F_OK)==0 && !self->Config->bOverwriteExisting)
+    // If the file already exists and the overwrite flag has not been set we fail.
+    // On Linux the final dump file has .<pid> appended, so check that name.
     {
-        Log(info, "Dump file %s already exists and was not overwritten (use -o to overwrite)", coreDumpFileName);
-        return NULL;
+#ifdef __linux__
+        char checkFileName[PATH_MAX+1];
+        snprintf(checkFileName, PATH_MAX, "%s.%d", gcorePrefixName, pid);
+#else
+        const char *checkFileName = coreDumpFileName;
+#endif
+        if(access(checkFileName, F_OK)==0 && !self->Config->bOverwriteExisting)
+        {
+            Log(info, "Dump file %s already exists and was not overwritten (use -o to overwrite)", checkFileName);
+            return NULL;
+        }
     }
 
     // validate core dump file path

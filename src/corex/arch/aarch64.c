@@ -1,7 +1,9 @@
 /*
  * aarch64.c - AArch64 architecture-specific register handling
  */
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <string.h>
 #include <errno.h>
 #include <sys/ptrace.h>

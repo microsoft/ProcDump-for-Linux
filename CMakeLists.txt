@@ -224,7 +224,7 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
               ${COREX_ARCH_SOURCE}
               )
   target_include_directories(corex PRIVATE ${corex_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/include)
-  target_compile_options(corex PRIVATE -g -pthread -fstack-protector-all -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -Werror -O2)
+  target_compile_options(corex PRIVATE -g -pthread -fstack-protector-all -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -Werror -D_GNU_SOURCE -O2)
 else()
   add_executable(procdump
                 ${procdump_SRC}/CoreDumpWriter.cpp
