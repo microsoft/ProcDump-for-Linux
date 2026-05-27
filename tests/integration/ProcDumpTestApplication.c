@@ -14,6 +14,9 @@
 #define FILE_DESC_COUNT	500
 #define THREAD_COUNT	100
 
+/* Marker for core dump content validation: GDB reads this to confirm the dump is valid */
+volatile int procdump_test_marker = 0xDEADBEEF;
+
 
 void* dFunc(int type)
 {
@@ -80,43 +83,47 @@ void* ThreadProc(void *input)
     return NULL;
 };
 
-// CPU stress function - consumes specified percentage of CPU
+// CPU stress function - consumes CPU.
+// For targets >= 95%, runs a pure busy loop (100% of one core).
+// For lower targets, alternates between busy and sleep periods using 1-second cycles.
+static volatile unsigned long cpu_burn_sink;
+
 void stress_cpu(int target_cpu_percentage) {
-    struct timespec work_time, sleep_time;
-    long work_usec, sleep_usec;
+    long cycle_usec = 1000000L;
+    long work_usec = (cycle_usec * target_cpu_percentage) / 100;
+    long sleep_usec = cycle_usec - work_usec;
     
-    // Calculate work and sleep times for desired CPU percentage
-    // Use 10ms cycle time for good responsiveness
-    work_usec = (10000 * target_cpu_percentage) / 100;
-    sleep_usec = 10000 - work_usec;
-    
-    work_time.tv_sec = work_usec / 1000000;
-    work_time.tv_nsec = (work_usec % 1000000) * 1000;
-    
+    struct timespec sleep_time;
     sleep_time.tv_sec = sleep_usec / 1000000;
     sleep_time.tv_nsec = (sleep_usec % 1000000) * 1000;
     
     printf("CPU stress: targeting %d%% load\n", target_cpu_percentage);
+    fflush(stdout);
     
+    unsigned long state = 1;
     while (1) {
         struct timespec start, now;
         clock_gettime(CLOCK_MONOTONIC, &start);
         
-        // Busy work period
+        // Xorshift busy loop - data dependency prevents compiler from
+        // folding or vectorizing the computation
         while (1) {
+            for (int i = 0; i < 1000000; i++) {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+            }
+            cpu_burn_sink = state;
+            
+            if (sleep_usec <= 0) continue;   // pure burn: skip time check
+            
             clock_gettime(CLOCK_MONOTONIC, &now);
             long elapsed = (now.tv_sec - start.tv_sec) * 1000000 + 
                           (now.tv_nsec - start.tv_nsec) / 1000;
             if (elapsed >= work_usec) break;
-            
-            // Some actual work to prevent optimization
-            volatile double x = 1.0;
-            for (int i = 0; i < 100; i++) {
-                x = x * 1.1;
-            }
         }
         
-        // Sleep period
+        // Sleep period (skipped for >= 100% target)
         if (sleep_usec > 0) {
             nanosleep(&sleep_time, NULL);
         }

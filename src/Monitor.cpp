@@ -12,6 +12,7 @@
 #endif
 
 #include "Includes.h"
+#include <math.h>
 
 #include <vector>
 #include <string>
@@ -294,7 +295,7 @@ void MonitorProcesses(struct ProcDumpConfiguration *self)
         monitoredProcessMap[config->ProcessId].active = false;
         pthread_mutex_unlock(&activeConfigurationsMutex);
         FreeProcDumpConfiguration(config);
-        free(config);
+        delete config;
     }
     else
     {
@@ -473,7 +474,7 @@ void MonitorProcesses(struct ProcDumpConfiguration *self)
         }
         pthread_mutex_unlock(&activeConfigurationsMutex);
 
-        free(target_config);
+        delete target_config;
     }
 }
 
@@ -609,13 +610,23 @@ int CreateMonitorThreads(struct ProcDumpConfiguration *self)
             (self->ThreadThreshold == -1) &&
             (self->FileDescriptorThreshold == -1) &&
             (self->DumpGCGeneration == -1) &&
-            (self->SignalCount == 0))
+            (self->SignalCount == 0) &&
+            (self->PerfCounterTriggerCount == 0))
         {
             if ((rc = CreateMonitorThread(self, RestrackManual, RestrackManualTriggerThread, (void *)self)) != 0)
             {
                 Trace("CreateMonitorThreads: failed to create RestrackManualTriggerThread.");
                 return rc;
             }
+        }
+    }
+
+    if (self->PerfCounterTriggerCount > 0)
+    {
+        if ((rc = CreateMonitorThread(self, PerfCounter, PerfCounterMonitoringThread, (void *)self)) != 0 )
+        {
+            Trace("CreateMonitorThreads: failed to create PerfCounterMonitoringThread.");
+            return rc;
         }
     }
 
@@ -2170,4 +2181,294 @@ bool ExitProcessMonitor(struct ProcDumpConfiguration* config, pthread_t processM
     pthread_join(processMonitor, NULL);
 
     return true;
+}
+
+//--------------------------------------------------------------------
+//
+// PerfCounterMonitoringThread context
+//
+//--------------------------------------------------------------------
+struct PerfCounterCallbackContext
+{
+    struct ProcDumpConfiguration* config;
+    struct CoreDumpWriter* writer;
+    uint64_t sessionId;
+    char* socketName;
+    int sessionFd;
+    bool sessionFinished;
+    pthread_mutex_t sessionFdMutex;
+};
+
+//--------------------------------------------------------------------
+//
+// PerfCounterQuitWatcher - Thread that waits for quit and shuts down
+// the EventPipe socket to unblock the blocked read.
+//
+//--------------------------------------------------------------------
+static void* PerfCounterQuitWatcher(void* arg)
+{
+    struct PerfCounterCallbackContext* context = (struct PerfCounterCallbackContext*)arg;
+    struct ProcDumpConfiguration* config = context->config;
+
+    while (WaitForQuit(config, 1000) == WAIT_TIMEOUT)
+    {
+        // keep waiting
+    }
+
+    // Quit signaled: wait until the session fd is published or the session exits.
+    while (true)
+    {
+        int sessionFd = -1;
+        bool sessionFinished = false;
+
+        pthread_mutex_lock(&context->sessionFdMutex);
+        sessionFd = context->sessionFd;
+        sessionFinished = context->sessionFinished;
+        pthread_mutex_unlock(&context->sessionFdMutex);
+
+        if (sessionFd >= 0)
+        {
+            // dup() so we don't race with the parser thread closing the original fd
+            int dupFd = dup(sessionFd);
+            if (dupFd >= 0)
+            {
+                shutdown(dupFd, SHUT_RDWR);
+                close(dupFd);
+            }
+            break;
+        }
+
+        if (sessionFinished)
+        {
+            break;
+        }
+
+        usleep(10 * 1000);
+    }
+
+    return NULL;
+}
+
+//--------------------------------------------------------------------
+//
+// PerfCounterCallback - Called for each counter value from EventPipe
+//
+//--------------------------------------------------------------------
+static bool PerfCounterCallback(struct EventPipeCounterValue* counterValue, void* ctx)
+{
+    struct PerfCounterCallbackContext* context = (struct PerfCounterCallbackContext*)ctx;
+    struct ProcDumpConfiguration* config = context->config;
+
+    if (IsQuit(config))
+    {
+        return false; // Stop the session
+    }
+
+    // Check each configured trigger
+    for (int i = 0; i < config->PerfCounterTriggerCount; i++)
+    {
+        struct PerfCounterTrigger* trigger = &config->PerfCounterTriggers[i];
+
+        if (strcasecmp(trigger->providerName, counterValue->providerName) == 0 &&
+            strcasecmp(trigger->counterName, counterValue->counterName) == 0)
+        {
+            double compareValue = counterValue->value;
+
+            // For Histogram metrics, select the requested percentile from the quantiles string
+            if (strcasecmp(counterValue->counterType, "Histogram") == 0 && counterValue->quantiles[0] != '\0')
+            {
+                double targetPct = trigger->percentile >= 0.0 ? trigger->percentile : 0.5; // default p50
+                double bestVal = counterValue->value; // fallback to default (p50)
+                bool found = false;
+
+                char parseBuf[512];
+                strncpy(parseBuf, counterValue->quantiles, sizeof(parseBuf) - 1);
+                parseBuf[sizeof(parseBuf) - 1] = '\0';
+
+                char* savePtr = NULL;
+                char* token = strtok_r(parseBuf, ";", &savePtr);
+                while (token != NULL)
+                {
+                    char* eq = strchr(token, '=');
+                    if (eq != NULL)
+                    {
+                        *eq = '\0';
+                        char* endKey = NULL;
+                        char* endVal = NULL;
+                        double qKey = strtod(token, &endKey);
+                        double qVal = strtod(eq + 1, &endVal);
+                        if (endKey != NULL && endKey != token && *endKey == '\0' && isfinite(qKey) &&
+                            endVal != NULL && endVal != (eq + 1) && *endVal == '\0' && isfinite(qVal))
+                        {
+                            if (fabs(qKey - targetPct) < 0.001)
+                            {
+                                bestVal = qVal;
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                    token = strtok_r(NULL, ";", &savePtr);
+                }
+                compareValue = bestVal;
+            }
+
+            if (!isfinite(compareValue))
+            {
+                Trace("PerfCounterCallback: non-finite counter value for %s:%s", counterValue->providerName, counterValue->counterName);
+                continue;
+            }
+
+            Trace("PerfCounterCallback: %s:%s = %.4f (threshold=%.4f, below=%d)",
+                  counterValue->providerName, counterValue->counterName,
+                  compareValue, trigger->threshold, trigger->triggerBelowValue);
+
+            bool triggered = false;
+            if (trigger->triggerBelowValue)
+            {
+                triggered = compareValue < trigger->threshold;
+            }
+            else
+            {
+                triggered = compareValue >= trigger->threshold;
+            }
+
+            if (triggered)
+            {
+                Log(info, "Trigger: %s:%s value:%.4f threshold:%.4f on process ID: %d",
+                    counterValue->providerName, counterValue->counterName,
+                    compareValue, trigger->threshold, config->ProcessId);
+
+                char* dumpFileName = WriteCoreDump(context->writer);
+                if (dumpFileName == NULL)
+                {
+                    SetQuit(config, 1);
+                    return false;
+                }
+                free(dumpFileName);
+
+                // Cooldown
+                if (WaitForQuit(config, config->ThresholdSeconds * 1000) != WAIT_TIMEOUT)
+                {
+                    return false;
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+//--------------------------------------------------------------------
+//
+// PerfCounterMonitoringThread - Thread that monitors .NET
+// performance counters via EventPipe and creates dumps when
+// thresholds are crossed.
+//
+// NOTE: .NET only.
+//
+//--------------------------------------------------------------------
+void *PerfCounterMonitoringThread(void *thread_args /* struct ProcDumpConfiguration* */)
+{
+    Trace("PerfCounterMonitoringThread: Enter [id=%d]", gettid());
+#ifdef __linux__
+    struct ProcDumpConfiguration *config = (struct ProcDumpConfiguration *)thread_args;
+    auto_free struct CoreDumpWriter *writer = NULL;
+    auto_free char* socketName = NULL;
+    int rc = 0;
+
+    writer = NewCoreDumpWriter(PERFCOUNTER, config);
+
+    if ((rc = WaitForQuitOrEvent(config, &config->evtStartMonitoring, INFINITE_WAIT)) == WAIT_OBJECT_0 + 1)
+    {
+        // Verify target is a .NET process
+        if (!IsCoreClrProcess(config->ProcessId, &socketName))
+        {
+            Log(error, "Performance counter triggers require a .NET process. Process %d does not appear to be a .NET process.", config->ProcessId);
+            SetQuit(config, 1);
+            Trace("PerfCounterMonitoringThread: Not a .NET process");
+            return NULL;
+        }
+
+        // Collect unique provider names from all triggers
+        const char* providerList[MAX_PERF_COUNTER_TRIGGERS];
+        int providerCount = 0;
+
+        for (int i = 0; i < config->PerfCounterTriggerCount; i++)
+        {
+            bool found = false;
+            for (int j = 0; j < providerCount; j++)
+            {
+                if (strcasecmp(providerList[j], config->PerfCounterTriggers[i].providerName) == 0)
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found && providerCount < MAX_PERF_COUNTER_TRIGGERS)
+            {
+                providerList[providerCount++] = config->PerfCounterTriggers[i].providerName;
+            }
+        }
+
+        // Convert polling interval from ms to seconds (minimum 1 second)
+        int intervalSeconds = config->PollingInterval / 1000;
+        if (intervalSeconds < 1) intervalSeconds = 1;
+
+        struct PerfCounterCallbackContext context;
+        context.config = config;
+        context.writer = writer;
+        context.sessionId = 0;
+        context.socketName = socketName;
+        context.sessionFd = -1;
+        context.sessionFinished = false;
+        pthread_mutex_init(&context.sessionFdMutex, NULL);
+
+        // Start a watcher thread that will shutdown the EventPipe fd on quit
+        pthread_t quitWatcher = -1;
+        if (pthread_create(&quitWatcher, NULL, PerfCounterQuitWatcher, &context) != 0)
+        {
+            Log(error, "Failed to create PerfCounterQuitWatcher thread. Shutdown may hang.");
+            SetQuit(config, 1);
+            pthread_mutex_destroy(&context.sessionFdMutex);
+            return NULL;
+        }
+
+        Log(info, "Starting performance counter monitoring for %d counter(s) on process %d...",
+            config->PerfCounterTriggerCount, config->ProcessId);
+
+        // This blocks until the session is stopped or an error occurs
+        rc = StartEventPipeCounterSession(
+            socketName,
+            providerList,
+            providerCount,
+            intervalSeconds,
+            PerfCounterCallback,
+            &context,
+            &context.sessionId,
+            &context.sessionFd,
+            &context.sessionFdMutex);
+
+        pthread_mutex_lock(&context.sessionFdMutex);
+        context.sessionFinished = true;
+        pthread_mutex_unlock(&context.sessionFdMutex);
+
+        // Wait for the quit watcher to finish
+        if (quitWatcher != (pthread_t)-1)
+        {
+            SetQuit(config, 1);
+            pthread_join(quitWatcher, NULL);
+        }
+
+        if (rc != 0)
+        {
+            Log(error, "Failed to start EventPipe counter session.");
+            SetQuit(config, 1);
+        }
+
+        pthread_mutex_destroy(&context.sessionFdMutex);
+    }
+#endif
+    Trace("PerfCounterMonitoringThread: Exit [id=%d]", gettid());
+    return NULL;
 }

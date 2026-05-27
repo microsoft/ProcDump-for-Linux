@@ -1,1 +1,0 @@
-APT::Get::Assume-Yes "true"; /etc/apt/apt.conf.d/90assumeyes

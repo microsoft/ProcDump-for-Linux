@@ -42,6 +42,7 @@
 #include <unordered_map>
 
 #define MAX_TRIGGERS 10
+#define MAX_PERF_COUNTER_TRIGGERS 5
 #define NO_PID INT_MAX
 #define EMPTY_PROC_NAME "(null)"
 
@@ -51,6 +52,15 @@
 // -------------------
 // Structs
 // -------------------
+
+struct PerfCounterTrigger
+{
+    char *providerName;       // e.g. "System.Runtime"
+    char *counterName;        // e.g. "gc-heap-size"
+    double threshold;         // numeric threshold
+    bool triggerBelowValue;   // true = trigger when < threshold
+    double percentile;        // for Histogram metrics: quantile to use (0.5=p50, 0.95=p95, etc.)
+};
 
 struct TriggerThread
 {
@@ -132,6 +142,11 @@ struct ProcDumpConfiguration
     bool bLeakReportInProgress;
     int SampleRate;                 // Record every X resource allocation in restrack
     int CoreDumpMask;               // -mc (core dump mask)
+    bool bUseGcore;                 // -usegcore (undocumented: use gcore instead of built-in corex)
+
+    // .NET Performance counter triggers
+    struct PerfCounterTrigger PerfCounterTriggers[MAX_PERF_COUNTER_TRIGGERS];
+    int PerfCounterTriggerCount;
 
     //
     // Keeps track of the memory allocations when -restrack is specified.

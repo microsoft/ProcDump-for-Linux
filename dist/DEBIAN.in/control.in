@@ -7,5 +7,5 @@ Description: Sysinternals process dump utility
  for various resources and generating crash dumps during a spike that an administrator
  or developer can use to determine the cause of the issue. ProcDump also serves as a
  general process dump utility that you can embed in other scripts.
-Depends: zlib1g, gdb (>= 7.6.1)
+Depends: zlib1g
 License: MIT

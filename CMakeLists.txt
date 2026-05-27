@@ -94,6 +94,17 @@ set(LD "/usr/bin/ld")
 set(libbpf_SOURCE_DIR ${CMAKE_BINARY_DIR}/libbpf/src/libbpf)
 set(procdump_ebpf_SOURCE_DIR ${CMAKE_SOURCE_DIR}/ebpf)
 set(sym_SOURCE_DIR ${CMAKE_SOURCE_DIR}/sym)
+set(corex_SOURCE_DIR ${CMAKE_SOURCE_DIR}/src/corex)
+
+# Detect architecture for corex
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
+    set(COREX_ARCH_SOURCE ${corex_SOURCE_DIR}/arch/x86_64.c)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64")
+    set(COREX_ARCH_SOURCE ${corex_SOURCE_DIR}/arch/aarch64.c)
+else()
+    message(WARNING "CoreX: unsupported architecture ${CMAKE_SYSTEM_PROCESSOR}, falling back to gcore")
+    set(COREX_ARCH_SOURCE "")
+endif()
 
 #
 # Compiler
@@ -185,6 +196,7 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
                 ${procdump_SRC}/CoreDumpWriter.cpp
                 ${procdump_SRC}/DotnetHelpers.cpp
                 ${procdump_SRC}/Events.cpp
+                ${procdump_SRC}/EventPipeHelper.cpp
                 ${procdump_SRC}/GenHelpers.cpp
                 ${procdump_SRC}/Handle.cpp
                 ${procdump_SRC}/Logging.cpp
@@ -201,6 +213,18 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
                 ${sym_SOURCE_DIR}/bcc_zip.cpp
                 ${PROJECT_BINARY_DIR}/ProcDumpProfiler.o
                 )
+
+  # Build corex as a separate static C library
+  add_library(corex STATIC
+              ${corex_SOURCE_DIR}/corex.c
+              ${corex_SOURCE_DIR}/proc_info.c
+              ${corex_SOURCE_DIR}/ptrace_utils.c
+              ${corex_SOURCE_DIR}/note_builder.c
+              ${corex_SOURCE_DIR}/elf_writer.c
+              ${COREX_ARCH_SOURCE}
+              )
+  target_include_directories(corex PRIVATE ${corex_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/include)
+  target_compile_options(corex PRIVATE -g -pthread -fstack-protector-all -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -Werror -D_GNU_SOURCE -O2)
 else()
   add_executable(procdump
                 ${procdump_SRC}/CoreDumpWriter.cpp
@@ -232,6 +256,7 @@ target_include_directories(procdump PUBLIC
                            /usr/include
                            ${sym_SOURCE_DIR}
                            ${procdump_ebpf_SOURCE_DIR}
+                           ${corex_SOURCE_DIR}
                           )
 
 if(NOT APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
@@ -243,7 +268,7 @@ endif()
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   add_dependencies(procdump libbpf procdump_ebpf)
-  target_link_libraries(procdump ${libbpf_SOURCE_DIR}/src/libbpf.a elf z pthread)
+  target_link_libraries(procdump ${libbpf_SOURCE_DIR}/src/libbpf.a elf z pthread corex)
 else()
   target_link_libraries(procdump z pthread)
 endif()

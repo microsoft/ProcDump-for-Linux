@@ -7,6 +7,8 @@
 //
 //--------------------------------------------------------------------
 #include "Includes.h"
+
+#include <math.h>
 #ifdef __linux__
 #include <syscall.h>
 #endif
@@ -93,6 +95,23 @@ bool ConvertToInt(const char* src, int* conv)
         return false;
 
     *conv = l;
+    return true;
+}
+
+//--------------------------------------------------------------------
+//
+// ConvertToDouble - Helper to convert from a char* to double
+//
+//--------------------------------------------------------------------
+bool ConvertToDouble(const char* src, double* conv)
+{
+    char *end;
+
+    double d = strtod(src, &end);
+    if (*end != '\0' || !isfinite(d))
+        return false;
+
+    *conv = d;
     return true;
 }
 

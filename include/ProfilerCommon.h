@@ -25,6 +25,7 @@ enum TriggerType
     GCGeneration,
     Restrack,
     RestrackManual,
+    PerfCounter,
 };
 
 #endif // PROFILERCOMMON_H

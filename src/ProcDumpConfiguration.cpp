@@ -8,6 +8,8 @@
 //--------------------------------------------------------------------
 #include "Includes.h"
 
+#include <math.h>
+
 extern pthread_mutex_t LoggerLock;
 long HZ;                                                        // clock ticks per second
 int MAXIMUM_CPU;                                                // maximum cpu usage percentage (# cores * 100)
@@ -189,6 +191,19 @@ void InitProcDumpConfiguration(struct ProcDumpConfiguration *self)
     self->bLeakReportInProgress =       false;
     self->SampleRate =                  0;
     self->CoreDumpMask =                -1;
+#ifdef __linux__
+    self->bUseGcore =                   false;
+#else
+    self->bUseGcore =                   true;   // macOS: always use gcore (no corex)
+#endif
+    self->PerfCounterTriggerCount =      0;
+    for(int j = 0; j < MAX_PERF_COUNTER_TRIGGERS; j++)
+    {
+        self->PerfCounterTriggers[j].providerName = NULL;
+        self->PerfCounterTriggers[j].counterName = NULL;
+        self->PerfCounterTriggers[j].threshold = 0;
+        self->PerfCounterTriggers[j].triggerBelowValue = false;
+    }
 
     self->socketPath =                  NULL;
     self->statusSocket =                -1;
@@ -288,6 +303,21 @@ void FreeProcDumpConfiguration(struct ProcDumpConfiguration *self)
         self->SignalNumber = NULL;
     }
 
+    for(int j = 0; j < self->PerfCounterTriggerCount; j++)
+    {
+        if(self->PerfCounterTriggers[j].providerName)
+        {
+            free(self->PerfCounterTriggers[j].providerName);
+            self->PerfCounterTriggers[j].providerName = NULL;
+        }
+        if(self->PerfCounterTriggers[j].counterName)
+        {
+            free(self->PerfCounterTriggers[j].counterName);
+            self->PerfCounterTriggers[j].counterName = NULL;
+        }
+    }
+    self->PerfCounterTriggerCount = 0;
+
 #ifdef __linux__
     for (const auto& pair : self->memAllocMap)
     {
@@ -363,6 +393,8 @@ struct ProcDumpConfiguration * CopyProcDumpConfiguration(struct ProcDumpConfigur
         copy->bLeakReportInProgress = self->bLeakReportInProgress;
         copy->SampleRate = self->SampleRate;
         copy->CoreDumpMask = self->CoreDumpMask;
+        copy->bUseGcore = self->bUseGcore;
+        copy->bOverwriteExisting = self->bOverwriteExisting;
         copy->bMemoryTriggerBelowValue = self->bMemoryTriggerBelowValue;
         copy->MemoryThresholdCount = self->MemoryThresholdCount;
         copy->bMonitoringGCMemory = self->bMonitoringGCMemory;
@@ -406,6 +438,17 @@ struct ProcDumpConfiguration * CopyProcDumpConfiguration(struct ProcDumpConfigur
         copy->socketPath = self->socketPath == NULL ? NULL : strdup(self->socketPath);
         copy->bDumpOnException = self->bDumpOnException;
         copy->statusSocket = self->statusSocket;
+
+        // Copy perf counter triggers
+        copy->PerfCounterTriggerCount = self->PerfCounterTriggerCount;
+        for(int j = 0; j < self->PerfCounterTriggerCount; j++)
+        {
+            copy->PerfCounterTriggers[j].providerName = self->PerfCounterTriggers[j].providerName == NULL ? NULL : strdup(self->PerfCounterTriggers[j].providerName);
+            copy->PerfCounterTriggers[j].counterName = self->PerfCounterTriggers[j].counterName == NULL ? NULL : strdup(self->PerfCounterTriggers[j].counterName);
+            copy->PerfCounterTriggers[j].threshold = self->PerfCounterTriggers[j].threshold;
+            copy->PerfCounterTriggers[j].triggerBelowValue = self->PerfCounterTriggers[j].triggerBelowValue;
+            copy->PerfCounterTriggers[j].percentile = self->PerfCounterTriggers[j].percentile;
+        }
 #ifdef __linux__
         copy->memAllocMap = self->memAllocMap;
 #endif
@@ -652,6 +695,92 @@ int GetOptions(struct ProcDumpConfiguration *self, int argc, char *argv[])
 
             i++;
         }
+        else if( 0 == strcasecmp( argv[i], "/pc" ) ||
+                    0 == strcasecmp( argv[i], "-pc" ) ||
+                    0 == strcasecmp( argv[i], "/pcl" ) ||
+                    0 == strcasecmp( argv[i], "-pcl" ))
+        {
+            if( i+2 >= argc ) return PrintUsage();
+            if( self->PerfCounterTriggerCount >= MAX_PERF_COUNTER_TRIGGERS )
+            {
+                Log(error, "Maximum of %d performance counter triggers allowed.", MAX_PERF_COUNTER_TRIGGERS);
+                return PrintUsage();
+            }
+
+            bool below = (0 == strcasecmp(argv[i], "/pcl") || 0 == strcasecmp(argv[i], "-pcl"));
+
+            // Parse provider:counter format
+            char* counterSpec = argv[i+1];
+            char* colon = strchr(counterSpec, ':');
+            if(colon == NULL || colon == counterSpec || *(colon+1) == '\0')
+            {
+                Log(error, "Performance counter must be specified as provider_name:counter_name.");
+                return PrintUsage();
+            }
+
+            double threshold = 0;
+            if(!ConvertToDouble(argv[i+2], &threshold))
+            {
+                Log(error, "Invalid performance counter threshold specified.");
+                return PrintUsage();
+            }
+
+            int idx = self->PerfCounterTriggerCount;
+            size_t providerLen = colon - counterSpec;
+            self->PerfCounterTriggers[idx].providerName = (char*) malloc(providerLen + 1);
+            if(self->PerfCounterTriggers[idx].providerName == NULL)
+            {
+                Log(error, INTERNAL_ERROR);
+                return -1;
+            }
+            memcpy(self->PerfCounterTriggers[idx].providerName, counterSpec, providerLen);
+            self->PerfCounterTriggers[idx].providerName[providerLen] = '\0';
+
+            self->PerfCounterTriggers[idx].counterName = strdup(colon + 1);
+            if(self->PerfCounterTriggers[idx].counterName == NULL)
+            {
+                Log(error, INTERNAL_ERROR);
+                free(self->PerfCounterTriggers[idx].providerName);
+                self->PerfCounterTriggers[idx].providerName = NULL;
+                return -1;
+            }
+
+            // Parse optional [pNN] percentile suffix for histogram metrics
+            // e.g., "http.server.request.duration[p95]" → counterName="http.server.request.duration", percentile=0.95
+            self->PerfCounterTriggers[idx].percentile = -1.0; // -1 = not specified (default p50 for histograms)
+            char* bracket = strchr(self->PerfCounterTriggers[idx].counterName, '[');
+            if (bracket != NULL && bracket[1] == 'p')
+            {
+                char* endBracket = strchr(bracket, ']');
+                if (endBracket != NULL && endBracket > bracket + 2)
+                {
+                    char pBuf[16] = {0};
+                    size_t pLen = (size_t)(endBracket - bracket - 2); // skip "[p"
+                    if (pLen > 0 && pLen < sizeof(pBuf))
+                    {
+                        memcpy(pBuf, bracket + 2, pLen);
+                        char* endPtr = NULL;
+                        double pVal = strtod(pBuf, &endPtr);
+                        if (endPtr != NULL && endPtr != pBuf && *endPtr == '\0' && isfinite(pVal))
+                        {
+                            // Accept values like 50, 95, 99 (convert to 0.50, 0.95, 0.99)
+                            // or raw fractions like 0.5, 0.95
+                            if (pVal >= 1.0 && pVal <= 100.0)
+                                pVal /= 100.0;
+                            if (pVal > 0.0 && pVal < 1.0)
+                                self->PerfCounterTriggers[idx].percentile = pVal;
+                        }
+                    }
+                    *bracket = '\0'; // strip the [pNN] suffix from counterName
+                }
+            }
+
+            self->PerfCounterTriggers[idx].threshold = threshold;
+            self->PerfCounterTriggers[idx].triggerBelowValue = below;
+            self->PerfCounterTriggerCount++;
+
+            i += 2;
+        }
 #endif
         else if( 0 == strcasecmp( argv[i], "/tc" ) ||
                     0 == strcasecmp( argv[i], "-tc" ))
@@ -809,6 +938,10 @@ int GetOptions(struct ProcDumpConfiguration *self, int argc, char *argv[])
                     0 == strcasecmp( argv[i], "-o" ))
         {
             self->bOverwriteExisting = true;
+        }
+        else if( 0 == strcasecmp( argv[i], "-usegcore" ))
+        {
+            self->bUseGcore = true;
         }
         else if( 0 == strcasecmp( argv[i], "/w" ) ||
                     0 == strcasecmp( argv[i], "-w" ))
@@ -1013,6 +1146,7 @@ int GetOptions(struct ProcDumpConfiguration *self, int argc, char *argv[])
         (self->FileDescriptorThreshold == -1) &&
         (self->DumpGCGeneration == -1) &&
         (self->SignalCount == 0) &&
+        (self->PerfCounterTriggerCount == 0) &&
         (self->bRestrackEnabled == false))
     {
         self->bTimerThreshold = true;
@@ -1022,7 +1156,7 @@ int GetOptions(struct ProcDumpConfiguration *self, int argc, char *argv[])
     // Signal trigger can only be specified alone
     if(self->SignalCount > 0 || self->bDumpOnException)
     {
-        if(self->CpuThreshold != -1 || self->ThreadThreshold != -1 || self->FileDescriptorThreshold != -1 || self->MemoryThreshold != NULL)
+        if(self->CpuThreshold != -1 || self->ThreadThreshold != -1 || self->FileDescriptorThreshold != -1 || self->MemoryThreshold != NULL || self->PerfCounterTriggerCount > 0)
         {
             Log(error, "Signal/Exception trigger must be the only trigger specified.");
             return PrintUsage();
@@ -1045,8 +1179,8 @@ int GetOptions(struct ProcDumpConfiguration *self, int argc, char *argv[])
         return PrintUsage();
     }
 
-    // Except for .NET triggers and Restrack with 'nodump' option, all other triggers use gdb/gcore
-    if(dotnetTriggerCount == 0 && !(self->bRestrackEnabled && !self->bRestrackGenerateDump)){
+    // Except for .NET triggers, Perf counter triggers and Restrack with 'nodump' option, all other triggers use gdb/gcore
+    if(dotnetTriggerCount == 0 && self->PerfCounterTriggerCount == 0 && !(self->bRestrackEnabled && !self->bRestrackGenerateDump)){
         if(!isBinaryOnPath("gcore")){
             Log(error, "failed to locate gcore binary in $PATH. Check that gdb/gcore is installed and configured on your system.");
             return -1;
@@ -1228,6 +1362,34 @@ bool PrintConfiguration(struct ProcDumpConfiguration *self)
         {
             printf("%-40s%s\n", "Exception monitor:", "n/a");
         }
+        // Performance counters
+        if (self->PerfCounterTriggerCount > 0)
+        {
+            for(int j = 0; j < self->PerfCounterTriggerCount; j++)
+            {
+                double pct = self->PerfCounterTriggers[j].percentile;
+                if (pct >= 0.0)
+                {
+                    int pctInt = (int)(pct * 100.0 + 0.5);
+                    printf("%-40s%s:%s[p%d] %s %.2f\n",
+                        "Perf Counter Trigger:",
+                        self->PerfCounterTriggers[j].providerName,
+                        self->PerfCounterTriggers[j].counterName,
+                        pctInt,
+                        self->PerfCounterTriggers[j].triggerBelowValue ? "<" : ">=",
+                        self->PerfCounterTriggers[j].threshold);
+                }
+                else
+                {
+                    printf("%-40s%s:%s %s %.2f\n",
+                        "Perf Counter Trigger:",
+                        self->PerfCounterTriggers[j].providerName,
+                        self->PerfCounterTriggers[j].counterName,
+                        self->PerfCounterTriggers[j].triggerBelowValue ? "<" : ">=",
+                        self->PerfCounterTriggers[j].threshold);
+                }
+            }
+        }
         // Exclude filter
         if (self->ExcludeFilter)
         {
@@ -1295,6 +1457,7 @@ int PrintUsage()
     printf("            [-restrack [nodump]]\n");
     printf("            [-sr Sample_Rate]\n");
     printf("            [-sig Signal_Number1[,Signal_Number2...]]\n");
+    printf("            [-pc|-pcl Provider:Counter[pN] Threshold]\n");
     printf("            [-e]\n");
     printf("            [-f Include_Filter,...]\n");
     printf("            [-fx Exclude_Filter]\n");
@@ -1326,6 +1489,10 @@ int PrintUsage()
     printf("   -restrack Enable memory leak tracking (malloc family of APIs). If used without other triggers, use 't' to manually capture a restrack report. When used with other triggers, the 'nodump' option can be used to prevent dump generation and only produce restrack report(s).\n");
     printf("   -sr     Sample rate when using -restrack.\n");
     printf("   -sig    Comma separated list of signal number(s) during which any signal results in a dump of the process.\n");
+    printf("   -pc     [.NET] Trigger when performance counter is at or exceeds the threshold. Format: provider_name:counter_name[pN] threshold.\n");
+    printf("           Supports both EventCounters and System.Diagnostics.Metrics. For histogram instruments, append [pN] to select\n");
+    printf("           a percentile (e.g., [p50], [p95], [p99]). Default is p50 if omitted.\n");
+    printf("   -pcl    [.NET] Trigger when performance counter falls below the threshold. Format: provider_name:counter_name[pN] threshold.\n");
     printf("   -e      [.NET] Create dump when the process encounters an exception.\n");
     printf("   -f      Filter (include) on the content of .NET exceptions (comma separated). Wildcards (*) are supported.\n");
     printf("   -fx     Filter (exclude) on the content of -restrack call stacks. Wildcards (*) are supported.\n");

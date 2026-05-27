@@ -25,7 +25,7 @@ extends:
   parameters:
     featureFlags:
       LinuxHostVersion:
-        Network: KS4
+        Network: KS1
     globalSdl:
       tsa:
         enabled: false

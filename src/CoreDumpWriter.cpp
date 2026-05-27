@@ -7,10 +7,13 @@
 //
 //--------------------------------------------------------------------
 #include "Includes.h"
+#ifdef __linux__
+#include "corex/corex.h"
+#endif
 
 #include <memory>
 
-static const char *CoreDumpTypeStrings[] = { "commit", "cpu", "thread", "filedesc", "signal", "time", "exception", "manual" };
+static const char *CoreDumpTypeStrings[] = { "commit", "cpu", "thread", "filedesc", "signal", "time", "exception", "manual", "perfcounter" };
 
 //--------------------------------------------------------------------
 //
@@ -237,7 +240,8 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
     gcorePrefixName = GetCoreDumpPrefixName(self->Config->ProcessId, name, self->Config->CoreDumpPath, self->Config->CoreDumpName, self->Type);
 
     // assemble filename
-    // On Linux, gcore appends .<pid> to the outputfile but on macOS it doesn't
+    // On Linux, gcore appends .<pid> to the output file; corex uses the full path directly.
+    // For the "already exists" check we need the final filename (with .pid on Linux).
 #ifdef __linux__
     if(snprintf(coreDumpFileName, PATH_MAX, "%s", gcorePrefixName) < 0)
 #else
@@ -249,11 +253,20 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
         exit(-1);
     }
 
-    // If the file already exists and the overwrite flag has not been set we fail
-    if(access(coreDumpFileName, F_OK)==0 && !self->Config->bOverwriteExisting)
+    // If the file already exists and the overwrite flag has not been set we fail.
+    // On Linux the final dump file has .<pid> appended, so check that name.
     {
-        Log(info, "Dump file %s already exists and was not overwritten (use -o to overwrite)", coreDumpFileName);
-        return NULL;
+#ifdef __linux__
+        char checkFileName[PATH_MAX+1];
+        snprintf(checkFileName, PATH_MAX, "%s.%d", gcorePrefixName, pid);
+#else
+        const char *checkFileName = coreDumpFileName;
+#endif
+        if(access(checkFileName, F_OK)==0 && !self->Config->bOverwriteExisting)
+        {
+            Log(info, "Dump file %s already exists and was not overwritten (use -o to overwrite)", checkFileName);
+            return NULL;
+        }
     }
 
     // validate core dump file path
@@ -300,113 +313,150 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
     }
     else
     {
-        // allocate output buffer
-        outputBuffer = (char**)malloc(sizeof(char*) * MAX_LINES);
-        if(outputBuffer == NULL)
+        if(self->Config->bUseGcore)
         {
-            Log(error, INTERNAL_ERROR);
-            Trace("WriteCoreDumpInternal: failed gcore output buffer allocation");
-            exit(-1);
-        }
-
-        // Oterwise, we use gcore dump generation   TODO@FUTURE: We might consider adding a forcegcore flag in cases where
-        // someone wants to use gcore even for .NET processes.
-        commandPipe = popen2_exec(gcoreArgv, "r", &gcorePid);
-        self->Config->gcorePid = gcorePid;
-
-        if(commandPipe == NULL)
-        {
-            Log(error, "An error occurred while generating the core dump");
-            Trace("WriteCoreDumpInternal: Failed to open pipe to gcore");
-            exit(1);
-        }
-
-        // read all output from gcore command
-        for(i = 0; i < MAX_LINES && fgets(lineBuffer, sizeof(lineBuffer), commandPipe) != NULL; i++)
-        {
-            lineLength = strlen(lineBuffer) + 1;                                // get # of characters read
-
-            outputBuffer[i] = (char*)malloc(sizeof(char) * lineLength);
-            if(outputBuffer[i] != NULL)
+            // Use gcore for dump generation (legacy fallback via -usegcore switch)
+            outputBuffer = (char**)malloc(sizeof(char*) * MAX_LINES);
+            if(outputBuffer == NULL)
             {
-                strcpy(outputBuffer[i], lineBuffer);
-                outputBuffer[i][lineLength-1] = '\0';                           // append null character
+                Log(error, INTERNAL_ERROR);
+                Trace("WriteCoreDumpInternal: failed gcore output buffer allocation");
+                exit(-1);
+            }
+
+            commandPipe = popen2_exec(gcoreArgv, "r", &gcorePid);
+            self->Config->gcorePid = gcorePid;
+
+            if(commandPipe == NULL)
+            {
+                Log(error, "An error occurred while generating the core dump");
+                Trace("WriteCoreDumpInternal: Failed to open pipe to gcore");
+                exit(1);
+            }
+
+            // read all output from gcore command
+            for(i = 0; i < MAX_LINES && fgets(lineBuffer, sizeof(lineBuffer), commandPipe) != NULL; i++)
+            {
+                lineLength = strlen(lineBuffer) + 1;
+
+                outputBuffer[i] = (char*)malloc(sizeof(char) * lineLength);
+                if(outputBuffer[i] != NULL)
+                {
+                    strcpy(outputBuffer[i], lineBuffer);
+                    outputBuffer[i][lineLength-1] = '\0';
+                }
+                else
+                {
+                    Log(error, INTERNAL_ERROR);
+                    Trace("WriteCoreDumpInternal: failed to allocate gcore error message buffer");
+                    exit(-1);
+                }
+            }
+
+            // Wait for child process to end and get exit status
+            int stat;
+            waitpid(gcorePid, &stat, 0);
+            int gcoreStatus = WEXITSTATUS(stat);
+
+            self->Config->gcorePid = NO_PID;
+            int pcloseStatus = 0;
+#ifdef __linux__
+            pcloseStatus = pclose(commandPipe);
+#endif
+
+            bool gcoreFailedMsg = false;
+
+            if(i > 0 && outputBuffer[i-1] != NULL)
+            {
+                if(strstr(outputBuffer[i-1], "gcore: failed") != NULL)
+                {
+                    gcoreFailedMsg = true;
+                }
+            }
+
+            if(gcoreStatus != 0 || pcloseStatus != 0 || (gcoreFailedMsg == true))
+            {
+                Log(error, "An error occurred while generating the core dump:");
+                if (gcoreStatus != 0)
+                {
+                    Log(error, "\tDump exit status = %d", gcoreStatus);
+
+                    if (gcoreStatus == 127)
+                    {
+                        Log(error, "\tFailed to start gcore process in $PATH. Check that gdb/gcore is installed and configured on your system.");
+                        Trace("WriteCoreDumpInternal: failed to start gcore (127)");
+                    }
+                }
+                if (pcloseStatus != 0)
+                    Log(error, "\tError closing pipe: %d", pcloseStatus);
+                if (gcoreFailedMsg)
+                    Log(error, "\tgcore failed");
+
+                for(int j = 0; j < i; j++)
+                {
+                    if(outputBuffer[j] != NULL)
+                    {
+                        Log(error, "GCORE - %s", outputBuffer[j]);
+                    }
+                }
+                exit(-1);
             }
             else
             {
-                Log(error, INTERNAL_ERROR);
-                Trace("WriteCoreDumpInternal: failed to allocate gcore error message buffer");
-                exit(-1);
-            }
-        }
-
-        // After reading all input, wait for child process to end and get exit status for bash gcore command
-        int stat;
-        waitpid(gcorePid, &stat, 0);
-        int gcoreStatus = WEXITSTATUS(stat);
-
-        // close pipe reading from gcore
-        self->Config->gcorePid = NO_PID;                // reset gcore pid so that signal handler knows we aren't dumping
-        int pcloseStatus = 0;
+                sleep(1);
 #ifdef __linux__
-        pcloseStatus = pclose(commandPipe);
+                snprintf(coreDumpFileName, PATH_MAX, "%s.%d", gcorePrefixName, pid);
 #endif
-
-        bool gcoreFailedMsg = false;    // in case error sneaks through the message output
-
-        // check if gcore was able to generate the dump
-        if(i > 0 && outputBuffer[i-1] != NULL)
-        {
-            if(strstr(outputBuffer[i-1], "gcore: failed") != NULL)
-            {
-                gcoreFailedMsg = true;
-            }
-        }
-
-        if(gcoreStatus != 0 || pcloseStatus != 0 || (gcoreFailedMsg == true))
-        {
-            Log(error, "An error occurred while generating the core dump:");
-            if (gcoreStatus != 0)
-            {
-                Log(error, "\tDump exit status = %d", gcoreStatus);
-
-                // if gcore is not found, the child process created to execute it will return a status of 127
-                if (gcoreStatus == 127)
+                if(access(coreDumpFileName, F_OK) != -1)
                 {
-                    Log(error, "\tFailed to start gcore process in $PATH. Check that gdb/gcore is installed and configured on your system.");
-                    Trace("WriteCoreDumpInternal: failed to start gcore (127)");
+                    if(self->Config->nQuit)
+                    {
+                        int ret = unlink(coreDumpFileName);
+                        if (ret < 0 && errno != ENOENT)
+                        {
+                            Trace("WriteCoreDumpInternal: Failed to remove partial core dump");
+                            exit(-1);
+                        }
+                    }
+                    else
+                    {
+                        Log(info, "Core dump %d generated: %s", self->Config->NumberOfDumpsCollected, coreDumpFileName);
+
+                        self->Config->NumberOfDumpsCollected++;
+                        if (self->Config->NumberOfDumpsCollected >= self->Config->NumberOfDumpsToCollect)
+                        {
+                            SetEvent(&self->Config->evtQuit.event);
+                        }
+                    }
                 }
             }
-            if (pcloseStatus != 0)
-                Log(error, "\tError closing pipe: %d", pcloseStatus);
-            if (gcoreFailedMsg)
-                Log(error, "\tgcore failed");
 
-            // log gcore message
             for(int j = 0; j < i; j++)
             {
-                if(outputBuffer[j] != NULL)
-                {
-                    Log(error, "GCORE - %s", outputBuffer[j]);
-                }
+                free(outputBuffer[j]);
             }
-            // on any error from gcore or pipe interaction, after logging the problem, we stop execution
-            exit(-1);
+            free(outputBuffer);
         }
         else
         {
-            // On WSL2 there is a delay between the core dump being written to disk and able to succesfully access it in the below check
-            sleep(1);
-            // validate that core dump file was generated
 #ifdef __linux__
-            // If we are on Linux we add back the .pid since gcore adds it to the filename
+            // Default on Linux: use corex for core dump generation
             snprintf(coreDumpFileName, PATH_MAX, "%s.%d", gcorePrefixName, pid);
-#endif
-            if(access(coreDumpFileName, F_OK) != -1)
+
+            corex_options_t corexOpts;
+            corexOpts.output_path = coreDumpFileName;
+            corexOpts.flags = COREX_FLAG_NONE;
+
+            int corexRet = corex_dump_pid(pid, &corexOpts);
+            if(corexRet != COREX_OK)
+            {
+                Log(error, "An error occurred while generating the core dump: %s", corex_strerror());
+                exit(-1);
+            }
+            else
             {
                 if(self->Config->nQuit)
                 {
-                    // if we are in a quit state from interrupt delete partially generated core dump file
                     int ret = unlink(coreDumpFileName);
                     if (ret < 0 && errno != ENOENT)
                     {
@@ -416,23 +466,22 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
                 }
                 else
                 {
-                    // log out sucessful core dump generated
                     Log(info, "Core dump %d generated: %s", self->Config->NumberOfDumpsCollected, coreDumpFileName);
 
-                    self->Config->NumberOfDumpsCollected++; // safe to increment in crit section
+                    self->Config->NumberOfDumpsCollected++;
                     if (self->Config->NumberOfDumpsCollected >= self->Config->NumberOfDumpsToCollect)
                     {
-                        SetEvent(&self->Config->evtQuit.event); // shut it down, we're done here
+                        SetEvent(&self->Config->evtQuit.event);
                     }
                 }
             }
+#else
+            // macOS: corex not available, should not reach here
+            // (bUseGcore is forced true on macOS at init time)
+            Log(error, "Internal error: corex path reached on macOS");
+            exit(-1);
+#endif
         }
-
-        for(int j = 0; j < i; j++)
-        {
-            free(outputBuffer[j]);
-        }
-        free(outputBuffer);
     }
 
 

@@ -11,6 +11,7 @@
 #include "DotnetHelpers.h"
 #include "ProfilerHelpers.h"
 #include "Restrack.h"
+#include "EventPipeHelper.h"
 #include "ProcDumpVersion.h"
 
 

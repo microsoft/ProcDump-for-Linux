@@ -1,7 +1,17 @@
 using System.Runtime.InteropServices;
+using System.Diagnostics.Tracing;
 
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
+
+// Ensure the EventSource is created early so counters are available
+_ = TestPerfCounterSource.Instance;
+
+app.MapGet("/setgauge/{value:double}", (double value) =>
+{
+    TestPerfCounterSource.Instance.SetGaugeValue(value);
+    return Results.Ok($"Gauge set to {value}");
+});
 
 app.MapGet("/throwinvalidoperation", () =>
 {
@@ -62,6 +72,15 @@ app.MapGet("/throwargumentexception", () =>
     throw new System.ArgumentException();
 });
 
+app.MapGet("/slowrequest/{ms:int}", async (int ms) =>
+{
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    await Task.Delay(ms);
+    sw.Stop();
+    TestPerfCounterSource.Instance.RecordDuration(sw.Elapsed.TotalSeconds);
+    return Results.Ok($"Delayed {sw.ElapsedMilliseconds}ms");
+});
+
 // Kills the web api
 app.MapGet("/terminate", () =>
 {
@@ -96,3 +115,45 @@ void DoWork()
 }
 
 app.Run();
+
+// Custom EventSource that publishes a controllable counter for testing
+[EventSource(Name = "TestWebApi.PerfCounter")]
+sealed class TestPerfCounterSource : EventSource
+{
+    public static readonly TestPerfCounterSource Instance = new TestPerfCounterSource();
+    private PollingCounter? _testGauge;
+    private EventCounter? _requestDuration;
+    private double _gaugeValue = 0;
+
+    private TestPerfCounterSource() { }
+
+    protected override void OnEventCommand(EventCommandEventArgs args)
+    {
+        if (args.Command == EventCommand.Enable)
+        {
+            _testGauge ??= new PollingCounter("test-gauge", this, () => _gaugeValue)
+            {
+                DisplayName = "Test Gauge",
+                DisplayUnits = "units"
+            };
+            _requestDuration ??= new EventCounter("request-duration", this)
+            {
+                DisplayName = "Request Duration",
+                DisplayUnits = "s"
+            };
+        }
+    }
+
+    public void SetGaugeValue(double value) => _gaugeValue = value;
+
+    public void RecordDuration(double seconds) => _requestDuration?.WriteMetric((float)seconds);
+
+    protected override void Dispose(bool disposing)
+    {
+        _testGauge?.Dispose();
+        _testGauge = null;
+        _requestDuration?.Dispose();
+        _requestDuration = null;
+        base.Dispose(disposing);
+    }
+}

@@ -73,7 +73,8 @@ enum ECoreDumpType {
     SIGNAL,                 // trigger on signal
     TIME,                   // trigger on time interval
     EXCEPTION,              // trigger on exception
-    MANUAL                  // manual trigger
+    MANUAL,                 // manual trigger
+    PERFCOUNTER             // trigger on .NET perf counter
 };
 
 struct CoreDumpWriter {

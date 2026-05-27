@@ -1,4 +1,5 @@
 #!/bin/bash
+# Test: -usegcore flag falls back to gcore for dump generation
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )";
 runProcDumpAndValidate=$(readlink -m "$DIR/../runProcDumpAndValidate.sh");
 source $runProcDumpAndValidate
@@ -6,13 +7,10 @@ source $runProcDumpAndValidate
 TESTPROGNAME="ProcDumpTestApplication"
 TESTPROGMODE="burn"
 
-# This are all the ProcDump switches preceeding the target
-PREFIX="-c 25"
+# These are all the ProcDump switches preceeding the PID
+PREFIX="-c 25 -usegcore"
 
-# ProcDump should wait for the process by name (-w) instead of by PID
-PROCDUMPWAITBYNAME="true"
-
-# This are all the ProcDump switches after the target
+# This are all the ProcDump switches after the PID
 POSTFIX=""
 
 # Indicates whether the test should result in a dump or not

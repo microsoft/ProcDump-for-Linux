@@ -117,6 +117,7 @@ static inline void cancel_pthread(unsigned long* val)
 int* GetSeparatedValues(char* src, char* separator, int* numValues);
 bool ConvertToInt(const char* src, int* conv);
 bool ConvertToIntHex(const char* src, int* conv);
+bool ConvertToDouble(const char* src, double* conv);
 bool IsValidNumberArg(const char *arg);
 bool CheckKernelVersion(int major, int minor);
 uint16_t* GetUint16(char* buffer);
