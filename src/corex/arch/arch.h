@@ -28,6 +28,7 @@ typedef struct user_fpregs_struct corex_fp_regs_t;
 #elif defined(__aarch64__)
 
 #include <sys/user.h>
+#include <asm/ptrace.h>
 typedef struct user_pt_regs     corex_gp_regs_t;
 typedef struct user_fpsimd_state corex_fp_regs_t;
 
