@@ -7,7 +7,9 @@
 //
 //--------------------------------------------------------------------
 #include "Includes.h"
+#ifdef __linux__
 #include "corex/corex.h"
+#endif
 
 #include <memory>
 
@@ -239,9 +241,6 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
 
     // assemble filename
     // On Linux, gcore appends .<pid> to the outputfile but on macOS it doesn't
-    // coreDumpFileName holds the gcore prefix (without .PID) initially
-    // finalDumpFileName holds the actual file that will be created
-    char finalDumpFileName[PATH_MAX+1] = {0};
 #ifdef __linux__
     if(snprintf(coreDumpFileName, PATH_MAX, "%s", gcorePrefixName) < 0)
 #else
@@ -253,12 +252,12 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
         exit(-1);
     }
 
-    // Compute the final dump filename (with .PID suffix on Linux)
-#ifdef __linux__
-    snprintf(finalDumpFileName, PATH_MAX, "%s.%d", gcorePrefixName, pid);
-#else
-    snprintf(finalDumpFileName, PATH_MAX, "%s", coreDumpFileName);
-#endif
+    // If the file already exists and the overwrite flag has not been set we fail
+    if(access(coreDumpFileName, F_OK)==0 && !self->Config->bOverwriteExisting)
+    {
+        Log(info, "Dump file %s already exists and was not overwritten (use -o to overwrite)", coreDumpFileName);
+        return NULL;
+    }
 
     // validate core dump file path
     if(!validateCoreDumpPath(coreDumpFileName))
@@ -283,15 +282,6 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
         Trace("WriteCoreDumpInternal: no write permission to core dump target file %s",
               coreDumpFileName);
         exit(-1);
-    }
-
-    // If the file already exists and the overwrite flag has not been set we fail.
-    // Use finalDumpFileName which includes the .PID suffix on Linux.
-    if(access(finalDumpFileName, F_OK)==0 && !self->Config->bOverwriteExisting)
-    {
-        Log(info, "Dump file %s already exists and was not overwritten (use -o to overwrite)", finalDumpFileName);
-        free(name);
-        return NULL;
     }
 
     if(socketName!=NULL)
@@ -439,12 +429,10 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
         }
         else
         {
-            // Default: use corex for core dump generation
 #ifdef __linux__
+            // Default on Linux: use corex for core dump generation
             snprintf(coreDumpFileName, PATH_MAX, "%s.%d", gcorePrefixName, pid);
-#endif
 
-            // Check overwrite AFTER the final filename (with .PID) is assembled
             corex_options_t corexOpts;
             corexOpts.output_path = coreDumpFileName;
             corexOpts.flags = COREX_FLAG_NONE;
@@ -477,6 +465,12 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
                     }
                 }
             }
+#else
+            // macOS: corex not available, should not reach here
+            // (bUseGcore is forced true on macOS at init time)
+            Log(error, "Internal error: corex path reached on macOS");
+            exit(-1);
+#endif
         }
     }
 

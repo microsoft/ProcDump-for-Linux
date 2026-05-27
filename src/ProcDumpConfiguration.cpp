@@ -191,7 +191,11 @@ void InitProcDumpConfiguration(struct ProcDumpConfiguration *self)
     self->bLeakReportInProgress =       false;
     self->SampleRate =                  0;
     self->CoreDumpMask =                -1;
+#ifdef __linux__
     self->bUseGcore =                   false;
+#else
+    self->bUseGcore =                   true;   // macOS: always use gcore (no corex)
+#endif
     self->PerfCounterTriggerCount =      0;
     for(int j = 0; j < MAX_PERF_COUNTER_TRIGGERS; j++)
     {
@@ -390,7 +394,6 @@ struct ProcDumpConfiguration * CopyProcDumpConfiguration(struct ProcDumpConfigur
         copy->SampleRate = self->SampleRate;
         copy->CoreDumpMask = self->CoreDumpMask;
         copy->bUseGcore = self->bUseGcore;
-        copy->bOverwriteExisting = self->bOverwriteExisting;
         copy->bMemoryTriggerBelowValue = self->bMemoryTriggerBelowValue;
         copy->MemoryThresholdCount = self->MemoryThresholdCount;
         copy->bMonitoringGCMemory = self->bMonitoringGCMemory;
@@ -433,7 +436,7 @@ struct ProcDumpConfiguration * CopyProcDumpConfiguration(struct ProcDumpConfigur
         copy->ExcludeFilter = self->ExcludeFilter == NULL ? NULL : strdup(self->ExcludeFilter);
         copy->socketPath = self->socketPath == NULL ? NULL : strdup(self->socketPath);
         copy->bDumpOnException = self->bDumpOnException;
-        copy->statusSocket = -1;
+        copy->statusSocket = self->statusSocket;
 
         // Copy perf counter triggers
         copy->PerfCounterTriggerCount = self->PerfCounterTriggerCount;
