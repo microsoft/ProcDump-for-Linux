@@ -34,10 +34,10 @@ apt upgrade -y \
     libelf-dev \
     libssl-dev
 
-# Install later version of clang needed for libbpf build
+# Install later version of clang needed for libbpf/bpftool build
 wget https://apt.llvm.org/llvm.sh
 chmod +x llvm.sh
-./llvm.sh 12
+./llvm.sh 13
 
 # Build openssl3
 wget https://www.openssl.org/source/openssl-3.1.2.tar.gz
@@ -50,7 +50,7 @@ make install
 arch=$(uname -m)
 
 # Build and install bpftool
-update-alternatives --install /usr/bin/clang clang /usr/bin/clang-12 200
+update-alternatives --install /usr/bin/clang clang /usr/bin/clang-13 200
 update-alternatives --config clang
 
 export CFLAGS="$CFLAGS -I/usr/local/openssl-3/include"
