@@ -151,7 +151,15 @@ void InitProcDumpConfiguration(struct ProcDumpConfiguration *self)
     self->evtStartMonitoring.type = EVENT;
 
     //sem_init(&(self->semAvailableDumpSlots.semaphore), 0, 1);
-    self->semAvailableDumpSlots.semaphore = sem_open("/procdump_sem", O_CREAT, 0644, 1);
+    // Unlink any stale semaphore left behind by a previous crash, then create fresh.
+    sem_unlink("/procdump_sem");
+    self->semAvailableDumpSlots.semaphore = sem_open("/procdump_sem", O_CREAT | O_EXCL, 0600, 1);
+    if(self->semAvailableDumpSlots.semaphore == SEM_FAILED)
+    {
+        Log(error, "Failed to create semaphore: %s", strerror(errno));
+        Trace("InitProcDumpConfiguration: sem_open failed with errno %d\n", errno);
+        exit(-1);
+    }
     self->semAvailableDumpSlots.type = SEMAPHORE;
 
     // Additional initialization
