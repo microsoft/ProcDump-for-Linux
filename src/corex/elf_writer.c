@@ -117,6 +117,13 @@ int elf_write_core(const char *path,
                    const corex_proc_info_t *proc,
                    const corex_note_buf_t *notes)
 {
+    if (proc->num_mappings < 0 || proc->num_mappings > COREX_MAX_MAPPINGS) {
+        corex_set_error("Invalid mapping count: %d", proc->num_mappings);
+        return COREX_ERR_INVALID_ARG;
+    }
+
+    size_t num_mappings = (size_t)proc->num_mappings;
+    
     /* Count only mappings that will be dumped */
     int num_loads = 0;
     for (int i = 0; i < proc->num_mappings; i++) {
