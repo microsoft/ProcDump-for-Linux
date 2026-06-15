@@ -4,8 +4,10 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt -y install software-properties-common
 apt-get update
-apt upgrade -y \
-&& apt-get install -y --no-install-recommends \
+# NOTE: Do NOT run `apt upgrade` here. In the emulated/seccomp-restricted CI
+# container it upgrades libc-bin, whose post-install ldconfig segfaults (exit 139),
+# aborting the whole install chain. Only install the packages we actually need.
+apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     jq \
@@ -57,11 +59,11 @@ export CFLAGS="$CFLAGS -I/usr/local/openssl-3/include"
 
 if [[ "$arch" == "aarch64" ]]; then
     export LDFLAGS="-L/usr/local/openssl-3/lib -lssl -lcrypto $LDFLAGS"
-    export PKG_CONFIG_PATH=/usr/local/openssl-3/lib/pkgconfig:$PKG_CONFIG_PATH    
-    export LD_LIBRARY_PATH=/usr/local/openssl-3/lib:$LD_LIBRARY_PATH    
+    export PKG_CONFIG_PATH=/usr/local/openssl-3/lib/pkgconfig:$PKG_CONFIG_PATH
+    export LD_LIBRARY_PATH=/usr/local/openssl-3/lib:$LD_LIBRARY_PATH
 else
     export LDFLAGS="-L/usr/local/openssl-3/lib64 -lssl -lcrypto $LDFLAGS"
-    export PKG_CONFIG_PATH=/usr/local/openssl-3/lib64/pkgconfig:$PKG_CONFIG_PATH    
+    export PKG_CONFIG_PATH=/usr/local/openssl-3/lib64/pkgconfig:$PKG_CONFIG_PATH
     export LD_LIBRARY_PATH=/usr/local/openssl-3/lib64:$LD_LIBRARY_PATH
 fi
 
@@ -78,6 +80,6 @@ wget https://github.com/debbuild/debbuild/releases/download/22.02.1/debbuild_22.
 
 # Install .NET SDK
 cd ~
-wget https://dot.net/v1/dotnet-install.sh 
+wget https://dot.net/v1/dotnet-install.sh
 chmod +x dotnet-install.sh
 ./dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet
