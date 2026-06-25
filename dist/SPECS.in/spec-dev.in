@@ -1,0 +1,29 @@
+Name:		procdump-devel
+Version:	@PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@.@PROJECT_VERSION_PATCH@
+Release:	@PROJECT_VERSION_TWEAK@%{?dist}
+Summary:	Development files for ProcDump (static library and headers)
+
+License:	MIT
+URL:		https://github.com/Microsoft/ProcDump-for-Linux
+
+%description
+This package contains the static library (libprocdump.a) and C header
+(ProcDumpLib.h) used to link against ProcDump and generate process core
+dumps on demand from your own programs.
+
+%install
+rm -rf $RPM_BUILD_ROOT
+mkdir -p $RPM_BUILD_ROOT/%{_libdir}
+cp libprocdump.a $RPM_BUILD_ROOT/%{_libdir}
+mkdir -p $RPM_BUILD_ROOT/%{_includedir}/procdump
+cp ProcDumpLib.h $RPM_BUILD_ROOT/%{_includedir}/procdump
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%files
+%{_libdir}/libprocdump.a
+%{_includedir}/procdump/ProcDumpLib.h
+
+%changelog
+@CHANGE_LOG@

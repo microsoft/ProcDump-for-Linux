@@ -89,6 +89,8 @@ set(profiler_INC ${CMAKE_SOURCE_DIR}/profiler/inc)
 set(profiler_SRC ${CMAKE_SOURCE_DIR}/profiler/src)
 set(procdump_INC ${CMAKE_SOURCE_DIR}/include)
 set(procdump_SRC ${CMAKE_SOURCE_DIR}/src)
+set(lib_INC ${CMAKE_SOURCE_DIR}/lib)
+set(lib_SRC ${CMAKE_SOURCE_DIR}/lib)
 set(procdump_Test ${CMAKE_SOURCE_DIR}/tests/integration)
 set(LD "/usr/bin/ld")
 set(libbpf_SOURCE_DIR ${CMAKE_BINARY_DIR}/libbpf/src/libbpf)
@@ -180,6 +182,8 @@ configure_file(${procdump_INC}/ProcDumpVersion.h.in ${PROJECT_BINARY_DIR}/ProcDu
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   configure_file(dist/DEBIAN.in/control.in DEBIANcontrol)
   configure_file(dist/SPECS.in/spec.in SPECS.spec)
+  configure_file(dist/DEBIAN.in/control-dev.in DEBIANcontrol-dev)
+  configure_file(dist/SPECS.in/spec-dev.in SPECS.spec-dev)
 endif()
 
 #
@@ -192,7 +196,12 @@ endif()
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   message(STATUS "Building for Linux")
-  add_executable(procdump
+
+  # Build the ProcDump core dump engine as a static library (libprocdump.a).
+  # External programs can link against this library and call the on-demand
+  # dump API declared in lib/ProcDumpLib.h. The procdump executable is a thin
+  # command-line front-end on top of the same library.
+  add_library(procdumplib STATIC
                 ${procdump_SRC}/CoreDumpWriter.cpp
                 ${procdump_SRC}/DotnetHelpers.cpp
                 ${procdump_SRC}/Events.cpp
@@ -201,17 +210,23 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
                 ${procdump_SRC}/Handle.cpp
                 ${procdump_SRC}/Logging.cpp
                 ${procdump_SRC}/Monitor.cpp
-                ${procdump_SRC}/Procdump.cpp
                 ${procdump_SRC}/ProcDumpConfiguration.cpp
                 ${procdump_SRC}/Process.cpp
                 ${procdump_SRC}/ProfilerHelpers.cpp
                 ${procdump_SRC}/Restrack.cpp
+                ${lib_SRC}/ProcDumpLib.cpp
                 ${sym_SOURCE_DIR}/bcc_proc.cpp
                 ${sym_SOURCE_DIR}/bcc_syms.cc
                 ${sym_SOURCE_DIR}/bcc_elf.cpp
                 ${sym_SOURCE_DIR}/bcc_perf_map.cpp
                 ${sym_SOURCE_DIR}/bcc_zip.cpp
                 ${PROJECT_BINARY_DIR}/ProcDumpProfiler.o
+                )
+  # Produce libprocdump.a (strip the default "libprocdumplib" naming).
+  set_target_properties(procdumplib PROPERTIES OUTPUT_NAME procdump)
+
+  add_executable(procdump
+                ${procdump_SRC}/Procdump.cpp
                 )
 
   # Build corex as a separate static C library
@@ -225,6 +240,21 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
               )
   target_include_directories(corex PRIVATE ${corex_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/include)
   target_compile_options(corex PRIVATE -g -pthread -fstack-protector-all -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -Werror -D_GNU_SOURCE -O2)
+
+  target_compile_options(procdumplib PRIVATE -g -pthread -fstack-protector-all -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -Werror -D_GNU_SOURCE -std=c++11 -O2)
+  target_include_directories(procdumplib PUBLIC
+                             ${procdump_INC}
+                             ${lib_INC}
+                             ${PROJECT_BINARY_DIR}
+                             /usr/include
+                             ${sym_SOURCE_DIR}
+                             ${procdump_ebpf_SOURCE_DIR}
+                             ${corex_SOURCE_DIR}
+                            )
+  if(NOT APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+    target_include_directories(procdumplib PUBLIC /usr/include/aarch64-linux-gnu)
+  endif()
+  add_dependencies(procdumplib libbpf procdump_ebpf)
 else()
   add_executable(procdump
                 ${procdump_SRC}/CoreDumpWriter.cpp
@@ -252,6 +282,7 @@ target_compile_options(procdump PRIVATE -g -pthread -fstack-protector-all -U_FOR
 
 target_include_directories(procdump PUBLIC
                            ${procdump_INC}
+                           ${lib_INC}
                            ${PROJECT_BINARY_DIR}
                            /usr/include
                            ${sym_SOURCE_DIR}
@@ -268,7 +299,8 @@ endif()
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   add_dependencies(procdump libbpf procdump_ebpf)
-  target_link_libraries(procdump ${libbpf_SOURCE_DIR}/src/libbpf.a elf z pthread corex)
+  target_link_libraries(procdumplib PUBLIC ${libbpf_SOURCE_DIR}/src/libbpf.a elf z pthread corex)
+  target_link_libraries(procdump procdumplib)
 else()
   target_link_libraries(procdump z pthread)
 endif()
@@ -310,6 +342,18 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   add_custom_target(rpm
                   COMMAND "${CMAKE_SOURCE_DIR}/makePackages.sh" "${CMAKE_SOURCE_DIR}" "${PROJECT_BINARY_DIR}" "${PACKAGE_NAME}" "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}" "0" "rpm"
                   DEPENDS "${CMAKE_SOURCE_DIR}/dist" "${PROJECT_BINARY_DIR}/procdump"
+                  )
+
+  # Development packages: static library (libprocdump.a) + public header.
+  # Debian convention uses a "-dev" suffix; RPM uses "-devel".
+  add_custom_target(deb-dev
+                  COMMAND "${CMAKE_SOURCE_DIR}/makePackages.sh" "${CMAKE_SOURCE_DIR}" "${PROJECT_BINARY_DIR}" "${PACKAGE_NAME}-dev" "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}" "0" "deb-dev" "${ARCHITECTURE}"
+                  DEPENDS "${CMAKE_SOURCE_DIR}/dist" procdumplib
+                  )
+
+  add_custom_target(rpm-dev
+                  COMMAND "${CMAKE_SOURCE_DIR}/makePackages.sh" "${CMAKE_SOURCE_DIR}" "${PROJECT_BINARY_DIR}" "${PACKAGE_NAME}-devel" "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}" "0" "rpm-dev"
+                  DEPENDS "${CMAKE_SOURCE_DIR}/dist" procdumplib
                   )
 else()
   add_custom_target(brew

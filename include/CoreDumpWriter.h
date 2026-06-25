@@ -80,6 +80,7 @@ enum ECoreDumpType {
 struct CoreDumpWriter {
     struct ProcDumpConfiguration *Config;
     enum ECoreDumpType Type;
+    char *ErrorMessage;     // Set to a descriptive, caller-owned string when dump generation fails (else NULL)
 };
 
 struct CoreDumpWriter *NewCoreDumpWriter(enum ECoreDumpType type, struct ProcDumpConfiguration *config);

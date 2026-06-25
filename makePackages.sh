@@ -74,6 +74,34 @@ if [ "$PACKAGE_TYPE" = "deb" ]; then
     exit 0
 fi
 
+if [ "$PACKAGE_TYPE" = "deb-dev" ]; then
+    DPKGDEB=`which dpkg-deb`
+
+    if [ -d "${PROJECT_BINARY_DIR}/deb-dev" ]; then
+        rm -rf "${PROJECT_BINARY_DIR}/deb-dev"
+    fi
+
+    # copy dev deb files (static library + public header)
+    mkdir -p "${PROJECT_BINARY_DIR}/deb-dev/${DEB_PACKAGE_NAME}/DEBIAN"
+    cp "${PROJECT_BINARY_DIR}/DEBIANcontrol-dev" "${PROJECT_BINARY_DIR}/deb-dev/${DEB_PACKAGE_NAME}/DEBIAN/control"
+    mkdir -p "${PROJECT_BINARY_DIR}/deb-dev/${DEB_PACKAGE_NAME}/usr/lib"
+    cp "${PROJECT_BINARY_DIR}/libprocdump.a" "${PROJECT_BINARY_DIR}/deb-dev/${DEB_PACKAGE_NAME}/usr/lib/"
+    mkdir -p "${PROJECT_BINARY_DIR}/deb-dev/${DEB_PACKAGE_NAME}/usr/include/procdump"
+    cp "${CMAKE_SOURCE_DIR}/lib/ProcDumpLib.h" "${PROJECT_BINARY_DIR}/deb-dev/${DEB_PACKAGE_NAME}/usr/include/procdump/"
+
+    # make the deb
+    if [ "$DPKGDEB" != "" ]; then
+        cd "${PROJECT_BINARY_DIR}/deb-dev"
+        "$DPKGDEB" -Zxz --build --root-owner-group "${DEB_PACKAGE_NAME}"
+        RET=$?
+    else
+        echo "No dpkg-deb found"
+        RET=1
+    fi
+
+    exit $RET
+fi
+
 if [ "$PACKAGE_TYPE" = "rpm" ]; then
     RPMBUILD=`which rpmbuild`
 
@@ -97,6 +125,33 @@ if [ "$PACKAGE_TYPE" = "rpm" ]; then
         echo "No rpmbuild found"
         RET=1
     fi
+fi
+
+if [ "$PACKAGE_TYPE" = "rpm-dev" ]; then
+    RPMBUILD=`which rpmbuild`
+
+    if [ -d "${PROJECT_BINARY_DIR}/rpm-dev" ]; then
+        rm -rf "${PROJECT_BINARY_DIR}/rpm-dev"
+    fi
+
+    # copy dev rpm files (static library + public header)
+    mkdir -p "${PROJECT_BINARY_DIR}/rpm-dev/${RPM_PACKAGE_NAME}/SPECS"
+    cp -a "${PROJECT_BINARY_DIR}/SPECS.spec-dev" "${PROJECT_BINARY_DIR}/rpm-dev/${RPM_PACKAGE_NAME}/SPECS/${RPM_PACKAGE_NAME}.spec"
+    mkdir -p "${PROJECT_BINARY_DIR}/rpm-dev/${RPM_PACKAGE_NAME}/BUILD/"
+    cp "${PROJECT_BINARY_DIR}/libprocdump.a" "${CMAKE_SOURCE_DIR}/lib/ProcDumpLib.h" "${PROJECT_BINARY_DIR}/rpm-dev/${RPM_PACKAGE_NAME}/BUILD/"
+
+    # make the rpm
+    if [ "$RPMBUILD" != "" ]; then
+        cd "${PROJECT_BINARY_DIR}/rpm-dev/${RPM_PACKAGE_NAME}"
+        "$RPMBUILD" --define "_topdir `pwd`" -v -bb "SPECS/${RPM_PACKAGE_NAME}.spec"
+        RET=$?
+        cp RPMS/$(uname -m)/*.rpm ..
+    else
+        echo "No rpmbuild found"
+        RET=1
+    fi
+
+    exit $RET
 fi
 
 if [ "$PACKAGE_TYPE" = "brew" ]; then
