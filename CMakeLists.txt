@@ -182,8 +182,6 @@ configure_file(${procdump_INC}/ProcDumpVersion.h.in ${PROJECT_BINARY_DIR}/ProcDu
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   configure_file(dist/DEBIAN.in/control.in DEBIANcontrol)
   configure_file(dist/SPECS.in/spec.in SPECS.spec)
-  configure_file(dist/DEBIAN.in/control-dev.in DEBIANcontrol-dev)
-  configure_file(dist/SPECS.in/spec-dev.in SPECS.spec-dev)
 endif()
 
 #
@@ -330,6 +328,28 @@ target_include_directories(ProcDumpTestApplication PUBLIC
 target_link_libraries(ProcDumpTestApplication pthread)
 
 #
+# Make ProcDump library test driver
+#
+# Thin CLI that exercises the public on-demand dump API (pdWriteDump /
+# pdFreeError) declared in lib/ProcDumpLib.h by linking against libprocdump.a.
+# Used by the integration test scenarios (lib_api_*.sh) to validate the library.
+#
+if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+  add_executable(ProcDumpLibTestDriver
+                 ${procdump_Test}/ProcDumpLibTestDriver.cpp
+                )
+
+  target_compile_options(ProcDumpLibTestDriver PRIVATE -g -pthread -fstack-protector-all -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -Werror -D_GNU_SOURCE -std=c++11 -O2)
+
+  target_include_directories(ProcDumpLibTestDriver PUBLIC
+                             ${lib_INC}
+                            )
+
+  add_dependencies(ProcDumpLibTestDriver procdumplib)
+  target_link_libraries(ProcDumpLibTestDriver procdumplib)
+endif()
+
+#
 # Make package(s)
 #
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
@@ -342,18 +362,6 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   add_custom_target(rpm
                   COMMAND "${CMAKE_SOURCE_DIR}/makePackages.sh" "${CMAKE_SOURCE_DIR}" "${PROJECT_BINARY_DIR}" "${PACKAGE_NAME}" "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}" "0" "rpm"
                   DEPENDS "${CMAKE_SOURCE_DIR}/dist" "${PROJECT_BINARY_DIR}/procdump"
-                  )
-
-  # Development packages: static library (libprocdump.a) + public header.
-  # Debian convention uses a "-dev" suffix; RPM uses "-devel".
-  add_custom_target(deb-dev
-                  COMMAND "${CMAKE_SOURCE_DIR}/makePackages.sh" "${CMAKE_SOURCE_DIR}" "${PROJECT_BINARY_DIR}" "${PACKAGE_NAME}-dev" "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}" "0" "deb-dev" "${ARCHITECTURE}"
-                  DEPENDS "${CMAKE_SOURCE_DIR}/dist" procdumplib
-                  )
-
-  add_custom_target(rpm-dev
-                  COMMAND "${CMAKE_SOURCE_DIR}/makePackages.sh" "${CMAKE_SOURCE_DIR}" "${PROJECT_BINARY_DIR}" "${PACKAGE_NAME}-devel" "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}" "0" "rpm-dev"
-                  DEPENDS "${CMAKE_SOURCE_DIR}/dist" procdumplib
                   )
 else()
   add_custom_target(brew

@@ -36,6 +36,13 @@ typedef struct user_fpsimd_state corex_fp_regs_t;
 #error "Unsupported architecture"
 #endif
 
+/* AArch64 pointer-authentication masks (NT_ARM_PAC_MASK descriptor layout).
+ * On architectures without pointer authentication this is simply unused. */
+typedef struct {
+    uint64_t data_mask;
+    uint64_t insn_mask;
+} corex_pac_mask_t;
+
 /* Read general-purpose registers for a stopped thread via ptrace.
  * Returns 0 on success. */
 int arch_read_gp_regs(pid_t tid, corex_gp_regs_t *regs);
@@ -43,6 +50,11 @@ int arch_read_gp_regs(pid_t tid, corex_gp_regs_t *regs);
 /* Read floating-point registers for a stopped thread via ptrace.
  * Returns 0 on success. */
 int arch_read_fp_regs(pid_t tid, corex_fp_regs_t *regs);
+
+/* Read the architecture's pointer-authentication masks for a stopped thread.
+ * Only meaningful on AArch64 with pointer authentication; returns 0 and fills
+ * *out when available, or -1 when unsupported/unavailable (e.g. on x86_64). */
+int arch_read_pac_mask(pid_t tid, corex_pac_mask_t *out);
 
 /* Fill an elf_prstatus structure from our captured GP register state. */
 void arch_fill_prstatus(struct elf_prstatus *prs, pid_t pid, pid_t tid,
