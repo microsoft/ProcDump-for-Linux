@@ -14,6 +14,8 @@ typedef struct {
     int                 signo;          /* Signal that stopped this thread */
     corex_gp_regs_t     gp_regs;       /* General-purpose registers */
     corex_fp_regs_t     fp_regs;       /* Floating-point registers */
+    corex_pac_mask_t    pac_mask;      /* AArch64 pointer-auth masks (if available) */
+    int                 has_pac_mask;  /* Non-zero if pac_mask is valid */
 } corex_thread_state_t;
 
 /* Attach to all threads of a process. Stops all threads.

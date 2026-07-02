@@ -1,5 +1,5 @@
-# ProcDump [![Build Status](https://dev.azure.com/sysinternals/Tools/_apis/build/status/Sysinternals.ProcDump-for-Linux?branchName=master)](https://dev.azure.com/sysinternals/Tools/_build/latest?definitionId=341&branchName=master)
-ProcDump is a Linux and Mac reimagining of the classic ProcDump tool from the Sysinternals suite of tools for Windows.  ProcDump provides a convenient way for Linux and Mac developers to create core dumps of their application based on performance triggers. ProcDump for Linux and Mac is part of [Sysinternals](https://sysinternals.com).
+# Sysinternals ProcDump [![Build Status](https://dev.azure.com/sysinternals/Tools/_apis/build/status/Sysinternals.ProcDump-for-Linux?branchName=master)](https://dev.azure.com/sysinternals/Tools/_build/latest?definitionId=341&branchName=master)
+ProcDump is a Linux and Mac reimagining of the classic Sysinternals ProcDump tool.  ProcDump provides a convenient way for Linux and Mac developers to create core dumps of their application based on performance triggers. ProcDump for Linux and Mac is part of [Sysinternals](https://sysinternals.com).
 
 ![ProcDump in use](procdump.gif "Procdump in use")
 

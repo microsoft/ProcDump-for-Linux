@@ -15,6 +15,10 @@
 #include "arch/arch.h"
 #include "corex_internal.h"
 
+#ifndef NT_ARM_PAC_MASK
+#define NT_ARM_PAC_MASK 0x406
+#endif
+
 int arch_read_gp_regs(pid_t tid, corex_gp_regs_t *regs)
 {
     struct iovec iov;
@@ -34,6 +38,23 @@ int arch_read_fp_regs(pid_t tid, corex_fp_regs_t *regs)
     iov.iov_len = sizeof(*regs);
 
     if (ptrace(PTRACE_GETREGSET, tid, (void *)(uintptr_t)NT_PRFPREG, &iov) < 0)
+        return -1;
+
+    return 0;
+}
+
+int arch_read_pac_mask(pid_t tid, corex_pac_mask_t *out)
+{
+    /*
+     * Capture the pointer-authentication masks. GDB needs the NT_ARM_PAC_MASK
+     * note to strip PAC bits from signed return addresses; without it stack
+     * unwinding stops at the first PAC-signed frame.
+     */
+    struct iovec iov;
+    iov.iov_base = out;
+    iov.iov_len = sizeof(*out);
+
+    if (ptrace(PTRACE_GETREGSET, tid, (void *)(uintptr_t)NT_ARM_PAC_MASK, &iov) < 0)
         return -1;
 
     return 0;
