@@ -13,7 +13,7 @@
 // logic in the existing shell-based framework.
 //
 // Usage:
-//   ProcDumpLibTestDriver <pid> <path> [mask] [overwrite]
+//   ProcDumpLibTestDriver <pid> <path> [mask] [overwrite] [stack-size]
 //
 //   pid        Target process id.
 //   path       Full dump path prefix. Two sentinels are recognised:
@@ -23,6 +23,8 @@
 //              PD_DUMP_MASK_DEFAULT. Defaults to "default".
 //   overwrite  Optional. 1 (default) to overwrite, 0 to fail if the
 //              dump file already exists.
+//   stack-size Optional. When non-zero, invoke pdWriteDump on a worker
+//              thread with this stack size in bytes.
 //
 // Exit codes:
 //   0   pdWriteDump returned success
@@ -40,14 +42,50 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <pthread.h>
 #include <unistd.h>
+
+struct DumpArguments
+{
+    pid_t pid;
+    const char* path;
+    int mask;
+    bool overwrite;
+    int result;
+};
+
+static void* writeDump(void* context)
+{
+    DumpArguments* arguments = static_cast<DumpArguments*>(context);
+    char* error = NULL;
+    arguments->result = pdWriteDump(arguments->pid,
+                                    arguments->path,
+                                    arguments->mask,
+                                    arguments->overwrite,
+                                    &error);
+
+    if(arguments->result != 0)
+    {
+        fprintf(stderr,
+                "pdWriteDump failed (rc=%d): %s\n",
+                arguments->result, error ? error : "(no detail)");
+    }
+    else
+    {
+        printf("pdWriteDump succeeded (pid=%d)\n", (int)arguments->pid);
+    }
+
+    // Always exercise pdFreeError, even on success (error is NULL there).
+    pdFreeError(error);
+    return NULL;
+}
 
 int main(int argc, char* argv[])
 {
     if(argc < 3)
     {
         fprintf(stderr,
-                "Usage: %s <pid> <path> [mask] [overwrite]\n",
+            "Usage: %s <pid> <path> [mask] [overwrite] [stack-size]\n",
                 argv[0]);
         return 2;
     }
@@ -80,22 +118,51 @@ int main(int argc, char* argv[])
         overwrite = (strtol(argv[4], NULL, 10) != 0);
     }
 
-    char* error = NULL;
-    int rc = pdWriteDump(pid, path, mask, overwrite, &error);
-
-    if(rc != 0)
+    size_t stackSize = 0;
+    if(argc >= 6)
     {
-        fprintf(stderr,
-                "pdWriteDump failed (rc=%d): %s\n",
-                rc, error ? error : "(no detail)");
+        stackSize = (size_t)strtoull(argv[5], NULL, 10);
+    }
+
+    DumpArguments arguments = {pid, path, mask, overwrite, -1};
+    if(stackSize == 0)
+    {
+        writeDump(&arguments);
     }
     else
     {
-        printf("pdWriteDump succeeded (pid=%d)\n", (int)pid);
+        pthread_attr_t attributes;
+        int rc = pthread_attr_init(&attributes);
+        if(rc != 0)
+        {
+            fprintf(stderr, "pthread_attr_init failed: %s\n", strerror(rc));
+            return 2;
+        }
+
+        rc = pthread_attr_setstacksize(&attributes, stackSize);
+        if(rc != 0)
+        {
+            fprintf(stderr, "pthread_attr_setstacksize failed: %s\n", strerror(rc));
+            pthread_attr_destroy(&attributes);
+            return 2;
+        }
+
+        pthread_t thread;
+        rc = pthread_create(&thread, &attributes, writeDump, &arguments);
+        pthread_attr_destroy(&attributes);
+        if(rc != 0)
+        {
+            fprintf(stderr, "pthread_create failed: %s\n", strerror(rc));
+            return 2;
+        }
+
+        rc = pthread_join(thread, NULL);
+        if(rc != 0)
+        {
+            fprintf(stderr, "pthread_join failed: %s\n", strerror(rc));
+            return 2;
+        }
     }
 
-    // Always exercise pdFreeError, even on success (error is NULL there).
-    pdFreeError(error);
-
-    return rc != 0 ? 1 : 0;
+    return arguments.result != 0 ? 1 : 0;
 }

@@ -22,6 +22,8 @@
 #
 #   LIBTEST_MASK       default (default) or a coredump_filter bitmask value
 #   LIBTEST_OVERWRITE  1 (default) or 0
+#   LIBTEST_STACK_SIZE  0 (default) to use the main thread, or the worker
+#                       thread stack size in bytes
 #   PRECREATE_DUMP     true to create the dump file before running (overwrite tests)
 #
 #   EXPECTSUCCESS      true (default) - expect pdWriteDump to return 0
@@ -43,6 +45,7 @@ function runLibTestAndValidate {
 	LIBTEST_PATH="${LIBTEST_PATH:-dump}"
 	LIBTEST_MASK="${LIBTEST_MASK:-default}"
 	LIBTEST_OVERWRITE="${LIBTEST_OVERWRITE:-1}"
+	LIBTEST_STACK_SIZE="${LIBTEST_STACK_SIZE:-0}"
 	EXPECTSUCCESS="${EXPECTSUCCESS:-true}"
 	SHOULDDUMP="${SHOULDDUMP:-$EXPECTSUCCESS}"
 	VALIDATE_SIZE="${VALIDATE_SIZE:-false}"
@@ -117,8 +120,8 @@ function runLibTestAndValidate {
 	fi
 
 	# Run the driver.
-	echo [`date +"%T.%3N"`] Running: "$DRIVERPATH" "$pidArg" "$pathArg" "$LIBTEST_MASK" "$LIBTEST_OVERWRITE"
-	"$DRIVERPATH" "$pidArg" "$pathArg" "$LIBTEST_MASK" "$LIBTEST_OVERWRITE"
+	echo [`date +"%T.%3N"`] Running: "$DRIVERPATH" "$pidArg" "$pathArg" "$LIBTEST_MASK" "$LIBTEST_OVERWRITE" "$LIBTEST_STACK_SIZE"
+	"$DRIVERPATH" "$pidArg" "$pathArg" "$LIBTEST_MASK" "$LIBTEST_OVERWRITE" "$LIBTEST_STACK_SIZE"
 	rc=$?
 	echo "[libtest] driver exit code: $rc"
 
