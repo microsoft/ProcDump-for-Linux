@@ -12,8 +12,39 @@
 #endif
 
 #include <memory>
+#include <stdarg.h>
 
 static const char *CoreDumpTypeStrings[] = { "commit", "cpu", "thread", "filedesc", "signal", "time", "exception", "manual", "perfcounter" };
+
+//--------------------------------------------------------------------
+//
+// SetWriterError - Records a descriptive, caller-owned error string on the
+// writer so that library callers (pdWriteDump) can surface the failure
+// reason instead of the process aborting.
+//
+//--------------------------------------------------------------------
+static void SetWriterError(struct CoreDumpWriter *self, const char *fmt, ...)
+{
+    if(self == NULL)
+    {
+        return;
+    }
+
+    if(self->ErrorMessage != NULL)
+    {
+        free(self->ErrorMessage);
+        self->ErrorMessage = NULL;
+    }
+
+    va_list args;
+    va_start(args, fmt);
+    char *msg = NULL;
+    if(vasprintf(&msg, fmt, args) >= 0)
+    {
+        self->ErrorMessage = msg;
+    }
+    va_end(args);
+}
 
 //--------------------------------------------------------------------
 //
@@ -33,6 +64,7 @@ struct CoreDumpWriter *NewCoreDumpWriter(enum ECoreDumpType type, struct ProcDum
 
     writer->Config = config;
     writer->Type = type;
+    writer->ErrorMessage = NULL;
 
     return writer;
 }
@@ -291,7 +323,9 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
         Log(error, INTERNAL_ERROR);
         Trace("WriteCoreDumpInternal: no write permission to core dump target file %s",
               coreDumpFileName);
-        exit(-1);
+        SetWriterError(self, "No write permission to core dump target directory: %s", self->Config->CoreDumpPath);
+        free(name);
+        return NULL;
     }
 
     if(socketName!=NULL)
@@ -301,6 +335,9 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
         if(GenerateCoreClrDump(socketName, coreDumpFileName)==false)
         {
             Log(error, "An error occurred while generating the core dump for the specified .NET process");
+            SetWriterError(self, "An error occurred while generating the core dump for the specified .NET process (pid %d)", pid);
+            free(name);
+            return NULL;
         }
         else
         {
@@ -331,7 +368,10 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
             {
                 Log(error, "An error occurred while generating the core dump");
                 Trace("WriteCoreDumpInternal: Failed to open pipe to gcore");
-                exit(1);
+                SetWriterError(self, "Failed to start gcore for process %d", pid);
+                free(outputBuffer);
+                free(name);
+                return NULL;
             }
 
             // read all output from gcore command
@@ -399,7 +439,16 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
                         Log(error, "GCORE - %s", outputBuffer[j]);
                     }
                 }
-                exit(-1);
+
+                SetWriterError(self, "gcore failed to generate core dump for process %d (exit status %d)", pid, gcoreStatus);
+
+                for(int j = 0; j < i; j++)
+                {
+                    free(outputBuffer[j]);
+                }
+                free(outputBuffer);
+                free(name);
+                return NULL;
             }
             else
             {
@@ -451,7 +500,9 @@ char* WriteCoreDumpInternal(struct CoreDumpWriter *self, char* socketName)
             if(corexRet != COREX_OK)
             {
                 Log(error, "An error occurred while generating the core dump: %s", corex_strerror());
-                exit(-1);
+                SetWriterError(self, "An error occurred while generating the core dump: %s", corex_strerror());
+                free(name);
+                return NULL;
             }
             else
             {

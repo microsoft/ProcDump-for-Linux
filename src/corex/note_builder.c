@@ -21,6 +21,10 @@
 #include "arch/arch.h"
 #include "corex/corex.h"
 
+#ifndef NT_ARM_PAC_MASK
+#define NT_ARM_PAC_MASK 0x406
+#endif
+
 #define NOTE_INITIAL_CAPACITY (256 * 1024)
 #define NOTE_ALIGN 4
 
@@ -125,6 +129,19 @@ static int build_prstatus_notes(corex_note_buf_t *buf,
                          &threads[i].fp_regs, arch_fp_regset_size());
         if (rc != 0)
             return rc;
+
+        /*
+         * NT_ARM_PAC_MASK (AArch64 pointer-authentication masks). GDB uses it
+         * to strip PAC bits from signed return addresses; without it stack
+         * unwinding halts at the first PAC-signed frame. Emitted per-thread,
+         * matching the kernel's core-dump layout. Uses the "LINUX" note owner.
+         */
+        if (threads[i].has_pac_mask) {
+            rc = note_append(buf, "LINUX", NT_ARM_PAC_MASK,
+                             &threads[i].pac_mask, sizeof(threads[i].pac_mask));
+            if (rc != 0)
+                return rc;
+        }
     }
     return 0;
 }

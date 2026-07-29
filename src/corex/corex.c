@@ -74,9 +74,7 @@ static int do_dump_pid(pid_t pid, const corex_options_t *opts)
         snprintf(task_path, sizeof(task_path), "/proc/%d/task", (int)pid);
         /* We'll use the full proc_info_read after attaching for everything else,
          * but we need TIDs now for attaching. */
-        corex_proc_info_t tmp;
-        memset(&tmp, 0, sizeof(tmp));
-        tmp.pid = pid;
+        proc->pid = pid;
 
         /* Read just the thread list */
         DIR *d = opendir(task_path);
@@ -85,27 +83,22 @@ static int do_dump_pid(pid_t pid, const corex_options_t *opts)
             rc = COREX_ERR_PROC_READ;
             goto cleanup;
         }
-        tmp.num_threads = 0;
+        proc->num_threads = 0;
         struct dirent *ent;
         while ((ent = readdir(d))) {
             if (ent->d_name[0] == '.') continue;
-            if (tmp.num_threads >= COREX_MAX_THREADS) break;
+            if (proc->num_threads >= COREX_MAX_THREADS) break;
             pid_t tid = (pid_t)atoi(ent->d_name);
             if (tid > 0)
-                tmp.tids[tmp.num_threads++] = tid;
+                proc->tids[proc->num_threads++] = tid;
         }
         closedir(d);
 
-        if (tmp.num_threads == 0) {
+        if (proc->num_threads == 0) {
             corex_set_error("No threads found for PID %d", (int)pid);
             rc = COREX_ERR_NO_THREADS;
             goto cleanup;
         }
-
-        /* Copy TIDs to proc */
-        proc->pid = pid;
-        proc->num_threads = tmp.num_threads;
-        memcpy(proc->tids, tmp.tids, sizeof(pid_t) * (size_t)tmp.num_threads);
     }
 
     /* Attach to all threads */

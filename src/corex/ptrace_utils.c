@@ -74,6 +74,10 @@ int ptrace_read_all_regs(const corex_proc_info_t *info,
                             (int)tid, strerror(errno));
             return COREX_ERR_PTRACE;
         }
+
+        /* Pointer-auth masks are optional (only present on AArch64 with PAC);
+         * their absence must not fail the dump. */
+        ts->has_pac_mask = (arch_read_pac_mask(tid, &ts->pac_mask) == 0) ? 1 : 0;
     }
 
     return 0;

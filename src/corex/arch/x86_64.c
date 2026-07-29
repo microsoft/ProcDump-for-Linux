@@ -39,6 +39,14 @@ int arch_read_fp_regs(pid_t tid, corex_fp_regs_t *regs)
     return 0;
 }
 
+int arch_read_pac_mask(pid_t tid, corex_pac_mask_t *out)
+{
+    /* x86_64 has no pointer authentication. */
+    (void)tid;
+    (void)out;
+    return -1;
+}
+
 void arch_fill_prstatus(struct elf_prstatus *prs, pid_t pid, pid_t tid,
                         int signo, const corex_gp_regs_t *gp_regs)
 {
