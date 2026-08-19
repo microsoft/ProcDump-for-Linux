@@ -61,8 +61,6 @@ extends:
             displayName: 'List compiler versions'
 
           - template: templates/build.yaml@ProcDump
-            parameters: 
-              ldpath: /usr/local/openssl-3/lib/
 
           - script: |
               cd procdump_build/tests/integration
@@ -95,8 +93,6 @@ extends:
             displayName: 'List compiler versions'
 
           - template: templates/build.yaml@ProcDump
-            parameters: 
-              ldpath: /usr/local/openssl-3/lib64/
 
           - script: |
               apt install -y iproute2
