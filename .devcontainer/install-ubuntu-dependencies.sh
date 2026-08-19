@@ -33,45 +33,22 @@ apt-get install -y --no-install-recommends \
     build-essential \
     libbpf-dev \
     gnupg \
-    libelf-dev \
-    libssl-dev
+    libelf-dev
 
 # Install later version of clang needed for libbpf/bpftool build
 wget https://apt.llvm.org/llvm.sh
 chmod +x llvm.sh
 ./llvm.sh 13
 
-# Build openssl3
-wget https://www.openssl.org/source/openssl-3.1.2.tar.gz
-tar xzf openssl-3.1.2.tar.gz
-cd openssl-3.1.2
-./config --prefix=/usr/local/openssl-3
-make
-make install
-
-arch=$(uname -m)
-
 # Build and install bpftool
 update-alternatives --install /usr/bin/clang clang /usr/bin/clang-13 200
 update-alternatives --config clang
-
-export CFLAGS="$CFLAGS -I/usr/local/openssl-3/include"
-
-if [[ "$arch" == "aarch64" ]]; then
-    export LDFLAGS="-L/usr/local/openssl-3/lib -lssl -lcrypto $LDFLAGS"
-    export PKG_CONFIG_PATH=/usr/local/openssl-3/lib/pkgconfig:$PKG_CONFIG_PATH
-    export LD_LIBRARY_PATH=/usr/local/openssl-3/lib:$LD_LIBRARY_PATH
-else
-    export LDFLAGS="-L/usr/local/openssl-3/lib64 -lssl -lcrypto $LDFLAGS"
-    export PKG_CONFIG_PATH=/usr/local/openssl-3/lib64/pkgconfig:$PKG_CONFIG_PATH
-    export LD_LIBRARY_PATH=/usr/local/openssl-3/lib64:$LD_LIBRARY_PATH
-fi
 
 rm -rf /usr/sbin/bpftool
 cd ~
 git clone --recurse-submodules https://github.com/libbpf/bpftool.git
 cd bpftool/src
-make install
+make SKIP_CRYPTO=1 install
 ln -s /usr/local/sbin/bpftool /usr/sbin/bpftool
 
 # install debbuild
