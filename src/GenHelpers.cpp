@@ -279,10 +279,38 @@ char* GetPath(char* lineBuf)
 // Returns: FILE* pointing to the r or w of the pipe between this thread and the spawned
 //
 //--------------------------------------------------------------------
+static bool IsAllowedExecName(const char *execName)
+{
+    static const char *allowedExecNames[] = { "gcore" };
+
+    if(execName == NULL)
+    {
+        return false;
+    }
+
+    for(size_t i = 0; i < sizeof(allowedExecNames)/sizeof(allowedExecNames[0]); i++)
+    {
+        if(strcmp(execName, allowedExecNames[i]) == 0)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 FILE *popen2_exec(const char *const argv[], const char *type, pid_t *pid)
 {
     int pipefd[2]; // 0 -> read, 1 -> write
     pid_t childPid;
+
+    if(argv == NULL || argv[0] == NULL || !IsAllowedExecName(argv[0]))
+    {
+        errno = EINVAL;
+        Log(error, INTERNAL_ERROR);
+        Trace("popen2_exec: attempted to execute unsupported binary");
+        return NULL;
+    }
 
     if ((pipe(pipefd)) == -1) {
         Log(error, INTERNAL_ERROR);
