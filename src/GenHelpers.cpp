@@ -304,7 +304,7 @@ FILE *popen2_exec(const char *const argv[], const char *type, pid_t *pid)
     int pipefd[2]; // 0 -> read, 1 -> write
     pid_t childPid;
 
-    if(argv == NULL || !IsAllowedExecName(argv[0]))
+    if(argv == NULL || argv[0] == NULL || !IsAllowedExecName(argv[0]))
     {
         errno = EINVAL;
         Log(error, INTERNAL_ERROR);
