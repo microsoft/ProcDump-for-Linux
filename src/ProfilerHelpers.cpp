@@ -295,13 +295,12 @@ char* GetEncodedExceptionFilter(char* exceptionFilterCmdLine, unsigned int numDu
     unsigned int numExceptions = 0;
     char* exceptionFilter = NULL;
     char* exceptionFilterCur = NULL;
-    char tmp[10];
     size_t len = 0;
 
     // If no exceptions were specified using -f we should dump on any exception (hence we add <any>)
     char* cpy = exceptionFilterCmdLine ? strdup(exceptionFilterCmdLine) : strdup("*");
 
-    numberOfDumpsLen = sprintf(tmp, "%d", numDumps);
+    numberOfDumpsLen = snprintf(NULL, 0, "%u", numDumps);
 
     char* token = strtok(cpy, ",");
     while(token!=NULL)
@@ -332,19 +331,19 @@ char* GetEncodedExceptionFilter(char* exceptionFilterCmdLine, unsigned int numDu
         len = strlen(token);
         if(token[0] != '*' && token[len-1] != '*')
         {
-            exceptionFilterCur += sprintf(exceptionFilterCur, "*%s*:%d;", token, numDumps);
+            exceptionFilterCur += sprintf(exceptionFilterCur, "*%s*:%u;", token, numDumps);
         }
         else if(token[0] != '*')
         {
-            exceptionFilterCur += sprintf(exceptionFilterCur, "*%s:%d;", token, numDumps);
+            exceptionFilterCur += sprintf(exceptionFilterCur, "*%s:%u;", token, numDumps);
         }
         else if(token[len-1] != '*')
         {
-            exceptionFilterCur += sprintf(exceptionFilterCur, "%s*:%d;", token, numDumps);
+            exceptionFilterCur += sprintf(exceptionFilterCur, "%s*:%u;", token, numDumps);
         }
         else
         {
-            exceptionFilterCur += sprintf(exceptionFilterCur, "%s:%d;", token, numDumps);
+            exceptionFilterCur += sprintf(exceptionFilterCur, "%s:%u;", token, numDumps);
         }
         token = strtok(NULL, ",");
     }
