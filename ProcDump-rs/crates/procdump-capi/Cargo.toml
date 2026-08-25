@@ -1,0 +1,18 @@
+[package]
+name = "procdump-capi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "procdump"
+crate-type = ["staticlib"]
+path = "src/lib.rs"
+
+[dependencies]
+libc.workspace = true
+procdump-core = { path = "../procdump-core" }
+
+[lints]
+workspace = true

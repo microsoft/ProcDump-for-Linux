@@ -1,0 +1,21 @@
+[package]
+name = "procdump-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+libc.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libbpf-rs = "0.27.0"
+
+[build-dependencies]
+libbpf-cargo = "0.27.0"
+
+[lints]
+workspace = true

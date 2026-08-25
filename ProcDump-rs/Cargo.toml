@@ -1,0 +1,25 @@
+[workspace]
+members = [
+    "crates/procdump-capi",
+    "crates/procdump-cli",
+    "crates/procdump-core",
+    "xtask",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+version = "0.1.0"
+
+[workspace.dependencies]
+libc = "0.2.177"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"

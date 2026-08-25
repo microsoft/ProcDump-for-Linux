@@ -1,0 +1,23 @@
+#ifndef PROFILERCOMMON_H
+#define PROFILERCOMMON_H
+
+#define CUMULATIVE_GC_SIZE 2008
+#define MAX_GC_GEN 2
+
+enum TriggerType
+{
+    Processor,
+    Commit,
+    Timer,
+    Signal,
+    ThreadCount,
+    FileDescriptorCount,
+    Exception,
+    GCThreshold,
+    GCGeneration,
+    Restrack,
+    RestrackManual,
+    PerfCounter,
+};
+
+#endif
