@@ -4,6 +4,18 @@
 macOS. The legacy integration scenarios remain the compatibility contract and
 are copied into a Cargo staging directory without modification.
 
+Platform process discovery and metrics are implemented behind shared Rust
+interfaces, with procfs on Linux and libproc/Mach on macOS. Dump generation is
+also behind a shared backend interface:
+
+- Linux native processes use the Rust corex ELF writer by default.
+- Linux managed processes use the .NET diagnostics IPC dump protocol.
+- macOS and the explicit Linux `-usegcore` fallback use `gcore`.
+
+The Linux eBPF kernel program and injected CLR profiler remain native code and
+are built by Cargo. Their userspace loading, monitoring, EventPipe handling,
+reporting, orchestration, and dump writing are Rust.
+
 ## Build and unit tests
 
 ```bash
@@ -57,8 +69,10 @@ content validation, dump-size comparison, and platform selection are retained.
 
 - Rust stable with `rustfmt` and `clippy`
 - A C and C++ compiler for the existing integration fixtures
-- `gcore` and `gdb`
+- `gcore` and `gdb` for compatibility validation and the explicit fallback
 - .NET SDK/runtime for managed scenarios
 - Root privileges for the complete legacy integration runner
 
-The eBPF resource tracker additionally requires clang, bpftool, and libbpf.
+The eBPF resource tracker additionally requires Clang, `pkg-config`, and the
+libelf and zlib development packages. Cargo builds the libbpf userspace runtime
+and generates the eBPF skeleton bindings.

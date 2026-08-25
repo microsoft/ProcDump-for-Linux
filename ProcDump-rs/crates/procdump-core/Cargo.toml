@@ -13,6 +13,7 @@ libc.workspace = true
 signal-hook.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
+blazesym = "=0.2.3"
 libbpf-rs = "0.27.0"
 
 [build-dependencies]

@@ -11,6 +11,7 @@ use std::time::Duration;
 
 pub struct DumpCoordinator {
     backend: Arc<dyn DumpBackend>,
+    sidecar: Option<Arc<dyn DumpSidecar>>,
     gate: DumpGate,
     control: Arc<MonitorControl>,
     request: DumpRequest,
@@ -19,14 +20,16 @@ pub struct DumpCoordinator {
 }
 
 impl DumpCoordinator {
-    pub fn new(
+    pub(crate) fn new(
         backend: Arc<dyn DumpBackend>,
+        sidecar: Option<Arc<dyn DumpSidecar>>,
         control: Arc<MonitorControl>,
         request: DumpRequest,
         limit: u32,
     ) -> Self {
         Self {
             backend,
+            sidecar,
             gate: DumpGate::new(),
             control,
             request,
@@ -56,14 +59,34 @@ impl DumpCoordinator {
 
         let mut request = self.request.clone();
         request.kind = kind;
-        let path = self.backend.write_dump(&request)?;
+        let dump_path = if self
+            .sidecar
+            .as_ref()
+            .is_none_or(|sidecar| sidecar.generate_primary_dump())
+        {
+            Some(self.backend.write_dump(&request)?)
+        } else {
+            None
+        };
+        let sidecar_path = self
+            .sidecar
+            .as_ref()
+            .map(|sidecar| sidecar.write(request.kind))
+            .transpose()?;
         let dump_number = self.collected.fetch_add(1, Ordering::AcqRel);
-        println!("Core dump {dump_number} generated: {}", path.display());
+        if let Some(path) = &dump_path {
+            println!("Core dump {dump_number} generated: {}", path.display());
+        }
         if dump_number + 1 >= self.limit {
             self.control.request_quit();
         }
-        Ok(Some(path))
+        Ok(dump_path.or(sidecar_path))
     }
+}
+
+pub(crate) trait DumpSidecar: Send + Sync {
+    fn generate_primary_dump(&self) -> bool;
+    fn write(&self, kind: DumpKind) -> Result<PathBuf, MonitorError>;
 }
 
 pub struct MonitorSet {
@@ -80,8 +103,29 @@ impl MonitorSet {
         backend: Arc<dyn DumpBackend>,
     ) -> Result<Self, MonitorError> {
         let control = Arc::new(MonitorControl::new());
+        let mut threads = Vec::new();
+        #[cfg(target_os = "linux")]
+        let sidecar: Option<Arc<dyn DumpSidecar>> = if config.restrack.is_some() {
+            let runtime = crate::restrack::spawn_restrack_monitors(
+                config,
+                Arc::clone(&control),
+                initial.clone(),
+                platform,
+            )?;
+            threads.extend(runtime.threads);
+            Some(runtime.reporter)
+        } else {
+            None
+        };
+        #[cfg(not(target_os = "linux"))]
+        let sidecar: Option<Arc<dyn DumpSidecar>> = if config.restrack.is_some() {
+            return Err(MonitorError::UnsupportedTrigger);
+        } else {
+            None
+        };
         let coordinator = Arc::new(DumpCoordinator::new(
             backend,
+            sidecar,
             Arc::clone(&control),
             DumpRequest {
                 pid: initial.identity.pid,
@@ -97,21 +141,6 @@ impl MonitorSet {
         let identity = initial.identity;
         let polling = Duration::from_millis(config.polling_interval_ms);
         let snooze = Duration::from_secs(config.threshold_seconds);
-        let mut threads = Vec::new();
-
-        #[cfg(target_os = "linux")]
-        if config.restrack.is_some() {
-            threads.extend(crate::restrack::spawn_restrack_monitors(
-                config,
-                Arc::clone(&control),
-                initial.clone(),
-                platform,
-            )?);
-        }
-        #[cfg(not(target_os = "linux"))]
-        if config.restrack.is_some() {
-            return Err(MonitorError::UnsupportedTrigger);
-        }
 
         #[cfg(target_os = "linux")]
         if config.dotnet_trigger.is_some() {
@@ -496,6 +525,22 @@ mod tests {
         }
     }
 
+    struct RecordingSidecar {
+        generate_dump: bool,
+        kinds: Mutex<Vec<DumpKind>>,
+    }
+
+    impl DumpSidecar for RecordingSidecar {
+        fn generate_primary_dump(&self) -> bool {
+            self.generate_dump
+        }
+
+        fn write(&self, kind: DumpKind) -> Result<PathBuf, MonitorError> {
+            self.kinds.lock().unwrap().push(kind);
+            Ok(PathBuf::from("report.restrack"))
+        }
+    }
+
     fn snapshot() -> ProcessSnapshot {
         ProcessSnapshot {
             identity: ProcessIdentity {
@@ -572,5 +617,34 @@ mod tests {
 
         monitor.wait().unwrap();
         assert_eq!(*backend.0.lock().unwrap(), vec![DumpKind::Cpu]);
+    }
+
+    #[test]
+    fn nodump_sidecar_completes_trigger_without_primary_dump() {
+        let backend = Arc::new(RecordingBackend::default());
+        let sidecar = Arc::new(RecordingSidecar {
+            generate_dump: false,
+            kinds: Mutex::new(Vec::new()),
+        });
+        let control = Arc::new(MonitorControl::new());
+        let request = DumpRequest {
+            pid: snapshot().identity.pid,
+            process_name: snapshot().name,
+            kind: DumpKind::Manual,
+            output: OutputSpec::default(),
+            overwrite: false,
+            use_gcore: false,
+            platform: Platform::Linux,
+        };
+        let coordinator =
+            DumpCoordinator::new(backend.clone(), Some(sidecar.clone()), control, request, 1);
+
+        assert_eq!(
+            coordinator.write(DumpKind::Timer).unwrap(),
+            Some(PathBuf::from("report.restrack"))
+        );
+        assert!(backend.0.lock().unwrap().is_empty());
+        assert_eq!(*sidecar.kinds.lock().unwrap(), vec![DumpKind::Timer]);
+        assert_eq!(coordinator.collected(), 1);
     }
 }

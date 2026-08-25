@@ -2,9 +2,12 @@
 
 use crate::config::{Config, Platform, RestrackConfig};
 use crate::dump::{DumpKind, DumpRequest, sidecar_path};
-use crate::monitor::MonitorError;
+use crate::monitor::{DumpSidecar, MonitorError};
 use crate::process::ProcessSnapshot;
 use crate::sync::{MonitorControl, WaitOutcome};
+use blazesym::Pid;
+use blazesym::symbolize::source::{Process, Source};
+use blazesym::symbolize::{Input, Symbolizer};
 use libbpf_rs::RingBufferBuilder;
 use libbpf_rs::skel::{OpenSkel, Skel, SkelBuilder};
 use std::collections::HashMap;
@@ -35,12 +38,72 @@ struct Allocation {
 
 type Allocations = Arc<Mutex<HashMap<u64, Allocation>>>;
 
-pub fn spawn_restrack_monitors(
+pub(crate) struct RestrackRuntime {
+    pub threads: Vec<JoinHandle<Result<(), MonitorError>>>,
+    pub reporter: Arc<dyn DumpSidecar>,
+}
+
+struct RestrackReporter {
+    allocations: Allocations,
+    config: RestrackConfig,
+    request: DumpRequest,
+    writers: Mutex<Vec<JoinHandle<()>>>,
+}
+
+impl DumpSidecar for RestrackReporter {
+    fn generate_primary_dump(&self) -> bool {
+        self.config.generate_dump
+    }
+
+    fn write(&self, kind: DumpKind) -> Result<std::path::PathBuf, MonitorError> {
+        let mut request = self.request.clone();
+        request.kind = kind;
+        let path = sidecar_path(&request, "restrack")?;
+        let file = File::create(&path).map_err(|error| {
+            MonitorError::Restrack(format!("failed to create {}: {error}", path.display()))
+        })?;
+        let snapshot = self
+            .allocations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let report_path = path.clone();
+        let config = self.config.clone();
+        let pid = request.pid.get();
+        let writer = thread::Builder::new()
+            .name("restrack report writer".into())
+            .spawn(move || match render_report(file, pid, &config, snapshot) {
+                Ok(()) => println!("Leak report generated: {}", report_path.display()),
+                Err(error) => eprintln!("Failed to generate leak report: {error}"),
+            })
+            .map_err(MonitorError::Spawn)?;
+        self.writers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(writer);
+        Ok(path)
+    }
+}
+
+impl Drop for RestrackReporter {
+    fn drop(&mut self) {
+        let writers = std::mem::take(
+            self.writers
+                .get_mut()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        );
+        for writer in writers {
+            let _ = writer.join();
+        }
+    }
+}
+
+pub(crate) fn spawn_restrack_monitors(
     config: &Config,
     control: Arc<MonitorControl>,
     process: ProcessSnapshot,
     platform: Platform,
-) -> Result<Vec<JoinHandle<Result<(), MonitorError>>>, MonitorError> {
+) -> Result<RestrackRuntime, MonitorError> {
     let restrack = config.restrack.clone().ok_or_else(|| {
         MonitorError::Restrack("resource tracking configuration is missing".into())
     })?;
@@ -81,9 +144,10 @@ pub fn spawn_restrack_monitors(
         }
     }
 
-    let mut threads = vec![collector];
-    if needs_manual_trigger(config) {
-        let request = DumpRequest {
+    let reporter = Arc::new(RestrackReporter {
+        allocations,
+        config: restrack,
+        request: DumpRequest {
             pid: process.identity.pid,
             process_name: process.name,
             kind: DumpKind::Manual,
@@ -91,15 +155,14 @@ pub fn spawn_restrack_monitors(
             overwrite: config.overwrite,
             use_gcore: config.use_gcore,
             platform,
-        };
-        threads.push(spawn_manual_trigger(
-            control,
-            allocations,
-            restrack,
-            request,
-        )?);
+        },
+        writers: Mutex::new(Vec::new()),
+    });
+    let mut threads = vec![collector];
+    if needs_manual_trigger(config) {
+        threads.push(spawn_manual_trigger(control, Arc::clone(&reporter))?);
     }
-    Ok(threads)
+    Ok(RestrackRuntime { threads, reporter })
 }
 
 fn collect_events(
@@ -192,9 +255,7 @@ fn handle_event(data: &[u8], allocations: &Allocations) {
 
 fn spawn_manual_trigger(
     control: Arc<MonitorControl>,
-    allocations: Allocations,
-    config: RestrackConfig,
-    request: DumpRequest,
+    reporter: Arc<RestrackReporter>,
 ) -> Result<JoinHandle<Result<(), MonitorError>>, MonitorError> {
     thread::Builder::new()
         .name("restrack manual trigger".into())
@@ -208,31 +269,25 @@ fn spawn_manual_trigger(
                 Ok(0) => Ok(()),
                 Ok(_) if input[0].eq_ignore_ascii_case(&b't') => {
                     println!("Triggering Restrack snapshot...");
-                    write_report(&request, &config, &allocations).map(|path| {
-                        println!("Leak report generated: {}", path.display());
-                    })
+                    reporter.write(DumpKind::Manual).map(|_| ())
                 }
                 Ok(_) => Ok(()),
-                Err(error) => Err(format!(
+                Err(error) => Err(MonitorError::Restrack(format!(
                     "failed to read the resource tracking trigger: {error}"
-                )),
+                ))),
             };
             control.request_quit();
-            result.map_err(MonitorError::Restrack)
+            result
         })
         .map_err(MonitorError::Spawn)
 }
 
-fn write_report(
-    request: &DumpRequest,
+fn render_report(
+    mut file: File,
+    pid: i32,
     config: &RestrackConfig,
-    allocations: &Allocations,
-) -> Result<std::path::PathBuf, String> {
-    let path = sidecar_path(request, "restrack").map_err(|error| error.to_string())?;
-    let snapshot = allocations
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
+    snapshot: HashMap<u64, Allocation>,
+) -> Result<(), String> {
     let mut grouped: HashMap<Allocation, u64> = HashMap::new();
     for allocation in snapshot.into_values() {
         *grouped.entry(allocation).or_default() += 1;
@@ -240,25 +295,25 @@ fn write_report(
     let mut grouped: Vec<_> = grouped.into_iter().collect();
     grouped.sort_by_key(|(allocation, count)| std::cmp::Reverse(allocation.size * count));
 
-    let mut file = File::create(&path)
-        .map_err(|error| format!("failed to create {}: {error}", path.display()))?;
     if grouped.is_empty() {
         file.write_all(b"No leaks detected.\n")
-            .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
-        return Ok(path);
+            .map_err(|error| format!("failed to write restrack report: {error}"))?;
+        return Ok(());
     }
 
+    let symbolizer = Symbolizer::new();
+    let mut process = Process::new(Pid::from(pid as u32));
+    process.map_files = false;
+    let source = Source::Process(process);
     let mut total = 0_u64;
+    let mut missing_symbols = false;
     for (allocation, count) in grouped {
-        let frame_lines: Vec<_> = allocation
-            .stack
-            .iter()
-            .map(|address| format!("\t[0x{address:x}]"))
-            .collect();
+        let frame_lines = symbolize_stack(&symbolizer, &source, &allocation.stack);
+        missing_symbols |= frame_lines.iter().any(|frame| !frame.symbolized);
         if config.exclude_filter.as_ref().is_some_and(|filter| {
             frame_lines
                 .iter()
-                .any(|frame| wildcard_matches(frame, &filter.to_string_lossy()))
+                .any(|frame| wildcard_matches(&frame.text, &filter.to_string_lossy()))
         }) {
             continue;
         }
@@ -269,16 +324,53 @@ fn write_report(
             "+++ Leaked Allocation [allocation size: 0x{:x} count:0x{count:x} total size:0x{allocation_total:x}]",
             allocation.size
         )
-        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+        .map_err(|error| format!("failed to write restrack report: {error}"))?;
         for frame in frame_lines {
-            writeln!(file, "{frame}")
-                .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+            writeln!(file, "{}", frame.text)
+                .map_err(|error| format!("failed to write restrack report: {error}"))?;
         }
-        writeln!(file).map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+        writeln!(file).map_err(|error| format!("failed to write restrack report: {error}"))?;
     }
     writeln!(file, "\nTotal leaked: 0x{total:x}")
-        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
-    Ok(path)
+        .map_err(|error| format!("failed to write restrack report: {error}"))?;
+    if missing_symbols {
+        writeln!(
+            file,
+            "\n[INFO] Some call stack frames could not be resolved to symbols. This may indicate missing debug symbols."
+        )
+        .map_err(|error| format!("failed to write restrack report: {error}"))?;
+    }
+    Ok(())
+}
+
+struct StackFrame {
+    text: String,
+    symbolized: bool,
+}
+
+fn symbolize_stack(symbolizer: &Symbolizer, source: &Source<'_>, stack: &[u64]) -> Vec<StackFrame> {
+    let symbols = symbolizer.symbolize(source, Input::AbsAddr(stack));
+    stack
+        .iter()
+        .enumerate()
+        .map(|(index, address)| {
+            let symbol = symbols
+                .as_ref()
+                .ok()
+                .and_then(|symbols| symbols.get(index))
+                .and_then(|symbol| symbol.as_sym());
+            match symbol {
+                Some(symbol) => StackFrame {
+                    text: format!("\t[0x{address:x}] {}+0x{:x}", symbol.name, symbol.offset),
+                    symbolized: true,
+                },
+                None => StackFrame {
+                    text: format!("\t[0x{address:x}]"),
+                    symbolized: false,
+                },
+            }
+        })
+        .collect()
 }
 
 fn needs_manual_trigger(config: &Config) -> bool {
@@ -356,5 +448,18 @@ mod tests {
     fn wildcard_matching_is_case_insensitive() {
         assert!(wildcard_matches("[0x123] malloc+0x4", "*MALLOC*"));
         assert!(!wildcard_matches("[0x123] calloc+0x4", "*malloc*"));
+    }
+
+    #[test]
+    fn process_symbolizer_resolves_libc_function() {
+        let symbolizer = Symbolizer::new();
+        let mut process = Process::new(Pid::Slf);
+        process.map_files = false;
+        let source = Source::Process(process);
+        let stack = [libc::malloc as *const () as usize as u64];
+        let frames = symbolize_stack(&symbolizer, &source, &stack);
+
+        assert!(frames[0].symbolized);
+        assert!(frames[0].text.contains("malloc"));
     }
 }
