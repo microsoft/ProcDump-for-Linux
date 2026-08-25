@@ -337,7 +337,7 @@ FILE *popen2_exec(const char *const argv[], const char *type, pid_t *pid)
             dup2(pipefd[0], STDIN_FILENO); // redirect pipe read to stdin
         }
 
-        execvp(argv[0], (char *const *)argv); // won't return on success
+        execvp("gcore", (char *const *)argv); // won't return on success
         _exit(127); // exec failed
     } else {
         // parent
