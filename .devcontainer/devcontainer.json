@@ -9,9 +9,9 @@
 	"customizations": {
 		"vscode": {
 			"extensions": [
+				"rust-lang.rust-analyzer",
 				"ms-vscode.cpptools",
-				"ms-vscode.cpptools-extension-pack",
-				"ms-vscode.makefile-tools"
+				"tamasfe.even-better-toml"
 			]
 		}
 	}

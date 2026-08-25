@@ -1,23 +1,51 @@
-# ProcDump [![Build Status](https://dev.azure.com/sysinternals/Tools/_apis/build/status/Sysinternals.ProcDump-for-Linux?branchName=master)](https://dev.azure.com/sysinternals/Tools/_build/latest?definitionId=341&branchName=master)
-ProcDump is a Linux and Mac reimagining of the classic ProcDump tool from the Sysinternals suite of tools for Windows.  ProcDump provides a convenient way for Linux and Mac developers to create core dumps of their application based on performance triggers. ProcDump for Linux and Mac is part of [Sysinternals](https://sysinternals.com).
+# ProcDump
+
+ProcDump is a Linux and macOS reimagining of the classic ProcDump tool from the
+Sysinternals suite for Windows. It creates process dumps in response to
+performance, runtime, signal, and resource-tracking triggers.
+
+The supported implementation is the Cargo workspace in this repository. Linux
+and macOS process access sit behind shared Rust interfaces. Linux native dumps
+use the Rust corex ELF writer by default; managed dumps use .NET diagnostics
+IPC; macOS and the explicit Linux `-usegcore` fallback use `gcore`.
+
+The Linux eBPF kernel program and injected CLR profiler remain native
+components under `native/`, built and embedded by Cargo. Their userspace
+loading, monitoring, EventPipe handling, orchestration, reporting, and dump
+writing are Rust.
 
 ![ProcDump in use](procdump.gif "Procdump in use")
 
 # Installation & Usage
 
 ## Requirements
-* Minimum Linux OS:
-  * Red Hat Enterprise Linux / CentOS 7
-  * Fedora 29
-  * Ubuntu 16.04 LTS
-  * `gdb` >= 7.6.1
-* Minimum Mac OS: Sierra
+* Rust stable with `rustfmt` and `clippy`
+* Linux: Clang, `pkg-config`, libelf/zlib development packages, `gdb`, and
+   `gcore`
+* macOS: Xcode command-line tools, `gdb`, and `gcore`
+* .NET SDK/runtime when running managed integration scenarios
  
 ## Install ProcDump
 Please see installation instructions [here](INSTALL.md).
 
 ## Build
 Please see build instructions [here](BUILD.md).
+
+```bash
+cargo build --workspace
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+## Repository layout
+
+* `crates/procdump-core`: shared configuration, platform, monitoring, and dump logic
+* `crates/procdump-cli`: command-line application
+* `crates/procdump-capi`: static C ABI and public header
+* `native/ebpf`: retained Linux eBPF kernel program
+* `native/profiler`: retained injected CLR profiler
+* `tests/integration`: unchanged compatibility scenarios and native test fixtures
+* `xtask`: Cargo staging and integration-test runner
 
 ## Usage
 **BREAKING CHANGE** With the release of ProcDump 1.3 the switches are now aligned with the Windows ProcDump version.

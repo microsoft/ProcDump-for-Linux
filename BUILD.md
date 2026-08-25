@@ -1,75 +1,89 @@
-# Linux
-## Containerized Builds
-The Dockerfiles in this repo (located under the `.devcontainer` directory) are the same Dockerfiles that are used on the backend build systems when a PR is built as part of the PR checks. This provides an easy and convenient way to ensure that any changes being made can be built using the same backend infrastructure.
+# Build ProcDump
 
-There are three Dockerfiles available:
+ProcDump is a Cargo workspace supporting Linux and macOS.
 
-- `Dockerfile_Ubuntu` (default)
-- `Dockerfile_Rocky`
-- `Dockerfile_AzureLinux`
+## Toolchain
 
-There are two primary ways to build using containers:
+Install stable Rust with `rustfmt` and `clippy`:
 
-1. If you use VS Code the repo has support for VS Code Dev Containers. To use this functionality, you need to have the VS Code Dev Containers extension installed as well as Docker. Once installed open VS Code and the `ProcDump-for-Linux` folder and go to command palette and select "Dev Containers: Rebuild and Reopen in Container".
-Once the container has finished building, you will be connected to the newly built container. You can also switch which Dockerfile you are using by setting the `dockerfile` field in the file `devcontainer.json`.
-For more information about VS Code Dev Containers please see - https://code.visualstudio.com/docs/devcontainers/containers
-
-2. Use the Dockerfiles located under the `.devcontainer` directory and build/run docker locally.
-
-To build inside the container:
-```sh
-mkdir build
-cd build
-cmake ..
-make
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup component add rustfmt clippy
 ```
-## Local Builds
-### Prerequisites
-#### Ubuntu
-```
+
+## Linux prerequisites
+
+Ubuntu/Debian:
+
+```bash
 sudo apt update
-sudo apt -y install gcc cmake make clang clang-12 gdb zlib1g-dev libelf-dev build-essential libbpf-dev linux-tools-common linux-tools-$(uname -r)
+sudo apt install -y build-essential clang pkg-config libelf-dev zlib1g-dev gdb
 ```
 
-#### Rocky Linux
-```
-sudo yum install gcc make cmake clang gdb zlib-devel elfutils-libelf-devel libbpf-devel bpftool
-```
+The complete integration suite also requires a .NET SDK/runtime and passwordless
+or interactive `sudo` access. Cargo builds libbpf and generates the eBPF skeleton;
+`bpftool` is useful for diagnostics but is not part of the userspace build.
 
-### Build
-```sh
-mkdir build
-cd build
-cmake ..
-make
-```
+## macOS prerequisites
 
-## Building Packages
-The distribution packages for Procdump for Linux are constructed utilizing `dpkg-deb` for Debian targets and `rpmbuild` for Fedora targets.
+Install Xcode command-line tools, Rust, and a working `gdb`/`gcore` installation:
 
-Create a deb package:
-```sh
-make deb
+```bash
+xcode-select --install
 ```
 
-Create an rpm package:
-```sh
-make rpm
+## Build and test
+
+Run from the repository root:
+
+```bash
+cargo build --workspace
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 ```
 
-# macOS
-### Prerequisites
-Install the clang tool chain. 
+Release artifacts:
 
-### Build
-```sh
-mkdir build
-cd build
-cmake ..
-make
+```bash
+cargo build --release --bin procdump
+cargo build --release -p procdump-capi
 ```
 
-## Building Packages
-```sh
-make brew
+This produces:
+
+* `target/release/procdump`
+* `target/release/libprocdump.a`
+* Public C header: `crates/procdump-capi/include/ProcDumpLib.h`
+
+## Integration tests
+
+Cargo stages the release binary, static library, native fixtures, and unchanged
+shell scenarios before running them:
+
+```bash
+cargo xtask stage-tests
+cargo xtask test-integration high_cpu
+cargo xtask test-integration
 ```
+
+Run Cargo as your normal user. `xtask` elevates only the staged compatibility
+runner when required.
+
+On Linux the runner selects `tests/integration/scenarios`; on macOS it selects
+`tests/integration/scenarios_mac`.
+
+## Cross-target checks
+
+The supported Rust code can be checked for the other platform without executing
+its scenarios:
+
+```bash
+rustup target add x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin
+cargo clippy -p procdump-core --target x86_64-unknown-linux-gnu -- -D warnings
+cargo clippy --workspace --target aarch64-apple-darwin -- -D warnings
+cargo clippy --workspace --target x86_64-apple-darwin -- -D warnings
+```
+
+Native integration scenarios still need to run on the corresponding operating
+system and architecture.

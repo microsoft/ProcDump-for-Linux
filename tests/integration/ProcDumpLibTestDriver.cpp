@@ -5,7 +5,7 @@
 //
 // ProcDumpLibTestDriver - Thin CLI used by the integration tests to
 // exercise the public on-demand dump API (pdWriteDump / pdFreeError)
-// declared in lib/ProcDumpLib.h.
+// declared in crates/procdump-capi/include/ProcDumpLib.h.
 //
 // The driver performs no validation of its own; it simply forwards the
 // arguments to pdWriteDump and reports the outcome so that the bash

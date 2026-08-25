@@ -1,5 +1,18 @@
 # Install ProcDump
 
+## Build from source
+
+Install the prerequisites in [BUILD.md](BUILD.md), then build and install the
+CLI from the repository root:
+
+```bash
+cargo build --release --bin procdump
+sudo install -m 0755 target/release/procdump /usr/local/bin/procdump
+```
+
+The static C API is generated at `target/release/libprocdump.a`; its public
+header is `crates/procdump-capi/include/ProcDumpLib.h`.
+
 ## Azure Linux 2.0
 ```sh
 sudo yum install procdump

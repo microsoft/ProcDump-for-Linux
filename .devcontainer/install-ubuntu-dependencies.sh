@@ -12,7 +12,7 @@ apt-get install -y --no-install-recommends \
     curl \
     jq \
     git \
-    cmake \
+    pkg-config \
     iputils-ping \
     libcurl4 \
     libicu67 \
@@ -60,3 +60,7 @@ cd ~
 wget https://dot.net/v1/dotnet-install.sh
 chmod +x dotnet-install.sh
 ./dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet
+
+# Install the Rust workspace toolchain.
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+/root/.cargo/bin/rustup component add rustfmt clippy
