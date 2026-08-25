@@ -452,7 +452,10 @@ impl fmt::Display for MonitorError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnsupportedTrigger => {
-                write!(formatter, "the selected trigger is not implemented yet")
+                write!(
+                    formatter,
+                    "the selected trigger configuration is unsupported"
+                )
             }
             Self::Spawn(error) => write!(formatter, "failed to create monitor thread: {error}"),
             Self::Process(error) => error.fmt(formatter),

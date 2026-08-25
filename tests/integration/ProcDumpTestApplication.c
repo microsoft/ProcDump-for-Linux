@@ -234,6 +234,8 @@ int main(int argc, char *argv[])
                     a(2);
                     a(3);
                 }
+                printf("Restrack allocations complete\n");
+                fflush(stdout);
             }
             else
             {

@@ -301,8 +301,9 @@ fn render_report(
         return Ok(());
     }
 
-    let symbolizer = Symbolizer::new();
+    let symbolizer = Symbolizer::builder().enable_demangling(false).build();
     let mut process = Process::new(Pid::from(pid as u32));
+    process.debug_syms = false;
     process.map_files = false;
     let source = Source::Process(process);
     let mut total = 0_u64;
@@ -452,8 +453,9 @@ mod tests {
 
     #[test]
     fn process_symbolizer_resolves_libc_function() {
-        let symbolizer = Symbolizer::new();
+        let symbolizer = Symbolizer::builder().enable_demangling(false).build();
         let mut process = Process::new(Pid::Slf);
+        process.debug_syms = false;
         process.map_files = false;
         let source = Source::Process(process);
         let stack = [libc::malloc as *const () as usize as u64];
