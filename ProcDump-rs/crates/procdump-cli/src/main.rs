@@ -1,15 +1,9 @@
-use procdump_core::config::{self, Config, Platform, TargetSpec};
+use procdump_core::config::{self, Platform};
 use procdump_core::dump::PlatformDumpBackend;
-use procdump_core::monitor::MonitorSet;
-use procdump_core::process::{
-    ProcessDiscovery, ProcessError, ProcessId, ProcessMetrics, ProcessSnapshot,
-};
-use std::ffi::OsStr;
+use procdump_core::orchestrator::monitor_processes;
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
 
 #[cfg(target_os = "linux")]
 use procdump_core::process::linux::LinuxProcfs as NativeProcesses;
@@ -47,96 +41,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err(message.into());
     }
     let processes = Arc::new(NativeProcesses::new()?);
-    let initial = resolve_target(&config, processes.as_ref())?;
 
     println!("ProcDump for Rust");
-    println!(
-        "Starting monitor for process {} ({})",
-        initial.name.to_string_lossy(),
-        initial.identity.pid.get()
-    );
-
-    let monitor = MonitorSet::start(
-        &config,
-        platform,
-        initial,
-        processes,
-        Arc::new(PlatformDumpBackend),
-    )?;
-    monitor.wait()?;
+    monitor_processes(&config, platform, processes, Arc::new(PlatformDumpBackend))?;
     Ok(())
-}
-
-fn resolve_target<P>(config: &Config, processes: &P) -> Result<ProcessSnapshot, ProcessError>
-where
-    P: ProcessDiscovery + ProcessMetrics,
-{
-    match &config.target {
-        TargetSpec::Pid(pid) => processes.sample(ProcessId::new(*pid)?),
-        TargetSpec::Name(name) => loop {
-            let mut newest = None;
-            for pid in processes.list_processes()? {
-                let candidate = match processes.name(pid) {
-                    Ok(candidate) => candidate,
-                    Err(ProcessError::Disappeared(_)) => continue,
-                    Err(error) => return Err(error),
-                };
-                let matches = if config.wait_for_process {
-                    candidate == *name
-                } else {
-                    os_eq_ignore_ascii_case(&candidate, name)
-                };
-                if matches {
-                    let snapshot = processes.sample(pid)?;
-                    if newest.as_ref().is_none_or(|current: &ProcessSnapshot| {
-                        snapshot.identity.start_time > current.identity.start_time
-                    }) {
-                        newest = Some(snapshot);
-                    }
-                }
-            }
-            if let Some(snapshot) = newest {
-                return Ok(snapshot);
-            }
-            if !config.wait_for_process {
-                return Err(ProcessError::NameNotFound(name.clone()));
-            }
-            thread::sleep(Duration::from_millis(config.polling_interval_ms));
-        },
-        TargetSpec::ProcessGroup(group) => {
-            let mut newest = None;
-            for pid in processes.list_processes()? {
-                let process_group = match processes.process_group(pid) {
-                    Ok(process_group) => process_group,
-                    Err(ProcessError::Disappeared(_)) => continue,
-                    Err(ProcessError::Io { source, .. })
-                        if source.kind() == std::io::ErrorKind::PermissionDenied =>
-                    {
-                        continue;
-                    }
-                    Err(error) => return Err(error),
-                };
-                if process_group == *group {
-                    let snapshot = match processes.sample(pid) {
-                        Ok(snapshot) => snapshot,
-                        Err(ProcessError::Disappeared(_)) => continue,
-                        Err(error) => return Err(error),
-                    };
-                    if newest.as_ref().is_none_or(|current: &ProcessSnapshot| {
-                        snapshot.identity.start_time > current.identity.start_time
-                    }) {
-                        newest = Some(snapshot);
-                    }
-                }
-            }
-            newest.ok_or(ProcessError::GroupNotFound(*group))
-        }
-    }
-}
-
-fn os_eq_ignore_ascii_case(left: &OsStr, right: &OsStr) -> bool {
-    left.to_string_lossy()
-        .eq_ignore_ascii_case(&right.to_string_lossy())
 }
 
 fn command_on_path(command: &str) -> bool {

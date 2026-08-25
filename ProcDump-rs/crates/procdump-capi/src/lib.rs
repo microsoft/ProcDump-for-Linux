@@ -103,6 +103,7 @@ fn write_dump(
                 file_name: path.file_name().map(std::ffi::OsStr::to_owned),
             },
             overwrite,
+            use_gcore: false,
             platform: native_platform(),
         })
         .map(|_| ())

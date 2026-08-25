@@ -45,6 +45,7 @@ pub struct DumpRequest {
     pub kind: DumpKind,
     pub output: OutputSpec,
     pub overwrite: bool,
+    pub use_gcore: bool,
     pub platform: Platform,
 }
 
@@ -81,8 +82,36 @@ impl DumpBackend for PlatformDumpBackend {
                 }
                 return Ok(paths.prefix);
             }
+            if !request.use_gcore {
+                return CorexBackend.write_dump(request);
+            }
         }
         GcoreBackend.write_dump(request)
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Debug, Default)]
+struct CorexBackend;
+
+#[cfg(target_os = "linux")]
+impl DumpBackend for CorexBackend {
+    fn write_dump(&self, request: &DumpRequest) -> Result<PathBuf, DumpError> {
+        let timestamp = local_timestamp()?;
+        let paths = dump_paths(request, &timestamp)?;
+        if paths.final_path.exists() && !request.overwrite {
+            return Err(DumpError::AlreadyExists(paths.final_path));
+        }
+        ensure_writable_directory(&request.output.directory)?;
+        crate::corex::dump_pid(request.pid.get(), &paths.final_path)
+            .map_err(|error| DumpError::Corex(error.to_string()))?;
+        if !paths.final_path.is_file() {
+            return Err(DumpError::Corex(format!(
+                "corex reported success but did not create {}",
+                paths.final_path.display()
+            )));
+        }
+        Ok(paths.final_path)
     }
 }
 
@@ -153,6 +182,7 @@ fn dump_paths(request: &DumpRequest, timestamp: &str) -> Result<DumpPaths, DumpE
     Ok(DumpPaths { prefix, final_path })
 }
 
+#[cfg(target_os = "linux")]
 pub(crate) fn sidecar_path(request: &DumpRequest, extension: &str) -> Result<PathBuf, DumpError> {
     let paths = dump_paths(request, &local_timestamp()?)?;
     let file_name = paths
@@ -250,6 +280,8 @@ pub enum DumpError {
         output: String,
     },
     DotNet(String),
+    #[cfg(target_os = "linux")]
+    Corex(String),
     Io {
         operation: &'static str,
         path: PathBuf,
@@ -286,6 +318,8 @@ impl fmt::Display for DumpError {
                 output.trim()
             ),
             Self::DotNet(error) => formatter.write_str(error),
+            #[cfg(target_os = "linux")]
+            Self::Corex(error) => write!(formatter, "corex failed to generate core dump: {error}"),
             Self::Io {
                 operation,
                 path,
@@ -320,6 +354,7 @@ mod tests {
             kind: DumpKind::Cpu,
             output,
             overwrite: false,
+            use_gcore: false,
             platform: Platform::Linux,
         }
     }

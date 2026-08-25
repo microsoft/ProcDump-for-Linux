@@ -161,6 +161,8 @@ fn write_elevated_runner(paths: &Paths) -> Result<(), XtaskError> {
            pkill -9 TestWebApi >/dev/null 2>&1 || true\n\
            pkill -9 procdump >/dev/null 2>&1 || true\n\
            pkill -9 gcore >/dev/null 2>&1 || true\n\
+                     pkill -9 -f '^cat /dev/urandom$' >/dev/null 2>&1 || true\n\
+                     rm -f /tmp/procdump/procdump-status-* >/dev/null 2>&1 || true\n\
          }}\n\
          cleanup() {{\n\
            cleanup_processes\n\

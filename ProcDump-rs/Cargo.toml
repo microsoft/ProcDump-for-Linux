@@ -15,6 +15,7 @@ version = "0.1.0"
 
 [workspace.dependencies]
 libc = "0.2.177"
+signal-hook = "0.3.18"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

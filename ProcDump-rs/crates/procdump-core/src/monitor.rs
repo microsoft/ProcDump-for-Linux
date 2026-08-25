@@ -89,6 +89,7 @@ impl MonitorSet {
                 kind: DumpKind::Manual,
                 output: config.output.clone(),
                 overwrite: config.overwrite,
+                use_gcore: config.use_gcore,
                 platform,
             },
             config.dump_count,
@@ -210,6 +211,14 @@ impl MonitorSet {
 
         control.start();
         Ok(Self { control, threads })
+    }
+
+    pub fn has_finished(&self) -> bool {
+        self.threads.iter().any(JoinHandle::is_finished)
+    }
+
+    pub fn request_quit(&self) {
+        self.control.request_quit();
     }
 
     pub fn wait(self) -> Result<(), MonitorError> {

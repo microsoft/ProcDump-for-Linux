@@ -5,6 +5,7 @@ use std::process::Command;
 fn main() {
     println!("cargo:rerun-if-env-changed=CXX");
     let target = env::var("TARGET").expect("Cargo must set TARGET");
+    let host = env::var("HOST").expect("Cargo must set HOST");
     if !target.contains("linux") {
         return;
     }
@@ -25,6 +26,11 @@ fn main() {
     println!("cargo:rerun-if-changed={}", profiler.display());
     let compiler = env::var_os("CXX").unwrap_or_else(|| "clang++".into());
     let mut command = Command::new(compiler);
+    if target != host && target.starts_with("x86_64") {
+        command.args(["--target=x86_64-linux-gnu", "--gcc-toolchain=/usr"]);
+    } else if target != host && target.starts_with("aarch64") {
+        command.args(["--target=aarch64-linux-gnu", "--gcc-toolchain=/usr"]);
+    }
     command.arg("-shared");
     for source in sources {
         command.arg(profiler.join("src").join(source));
@@ -62,7 +68,7 @@ fn main() {
     let ebpf = workspace.join("native/ebpf");
     println!("cargo:rerun-if-changed={}", ebpf.display());
     let (target_arch, multiarch_include) = if target.starts_with("x86_64") {
-        ("-D__TARGET_ARCH_x86", "/usr/include/x86_64-linux-gnu")
+        ("-D__TARGET_ARCH_x86", "/usr/x86_64-linux-gnu/include")
     } else if target.starts_with("aarch64") {
         ("-D__TARGET_ARCH_arm64", "/usr/include/aarch64-linux-gnu")
     } else {

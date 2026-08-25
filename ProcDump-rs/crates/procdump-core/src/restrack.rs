@@ -89,6 +89,7 @@ pub fn spawn_restrack_monitors(
             kind: DumpKind::Manual,
             output: config.output.clone(),
             overwrite: config.overwrite,
+            use_gcore: config.use_gcore,
             platform,
         };
         threads.push(spawn_manual_trigger(
