@@ -30,6 +30,15 @@ struct ResourceInformation
     unsigned long allocSize;
     long callStackLen;
     __u64 stackTrace[MAX_CALL_STACK_FRAMES];
+    unsigned long previousAddress;
 };
+
+_Static_assert(__builtin_offsetof(struct ResourceInformation, allocAddress) == 0, "allocAddress ABI");
+_Static_assert(__builtin_offsetof(struct ResourceInformation, pid) == 8, "pid ABI");
+_Static_assert(__builtin_offsetof(struct ResourceInformation, resourceType) == 16, "resourceType ABI");
+_Static_assert(__builtin_offsetof(struct ResourceInformation, allocSize) == 24, "allocSize ABI");
+_Static_assert(__builtin_offsetof(struct ResourceInformation, callStackLen) == 32, "callStackLen ABI");
+_Static_assert(__builtin_offsetof(struct ResourceInformation, stackTrace) == 40, "stackTrace ABI");
+_Static_assert(__builtin_offsetof(struct ResourceInformation, previousAddress) == 840, "previousAddress ABI");
 
 #endif // __PROCDUMP_EBPF_COMMON_H__

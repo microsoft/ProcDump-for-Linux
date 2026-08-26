@@ -25,8 +25,6 @@
 #define DETACH_TIMEOUT  30000
 #define HEALTH_POLL_FREQ 5              // In secs
 
-#define LOG_FILE    "/var/tmp/procdumpprofiler.log"
-#define MAX_LOG_FILE_SIZE    "1000000"
 #define DATE_LENGTH 26
 #define PROFILER_STATUS_FAILURE 'F'
 #define PROFILER_STATUS_HEALTH 'H'

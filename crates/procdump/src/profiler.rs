@@ -1,17 +1,18 @@
 #![allow(unsafe_code)]
 
 use crate::config::{Config, DotNetTrigger, GcHeap};
-use crate::monitor::MonitorError;
+use crate::monitor::{DumpCoordinator, MonitorError};
 use crate::process::ProcessIdentity;
 use crate::sync::{MonitorControl, WaitOutcome};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const PROFILER_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/procdumpprofiler.so"));
 const PROFILER_GUID: [u8; 16] = [
@@ -21,10 +22,14 @@ const ATTACH_TIMEOUT_MS: u32 = 5_000;
 const PROFILER_COMMAND_SET: u8 = 0x03;
 const PROFILER_COMMAND_ID: u8 = 0x01;
 const MAX_STATUS_PAYLOAD: usize = 16 * 1024;
+const PROFILER_DIRECTORY_MODE: u32 = 0o755;
+const PROFILER_FILE_MODE: u32 = 0o755;
+const STATUS_SOCKET_MODE: u32 = 0o622;
 
 pub(crate) fn spawn_profiler_monitor(
     config: &Config,
     control: Arc<MonitorControl>,
+    coordinator: Arc<DumpCoordinator>,
     identity: ProcessIdentity,
 ) -> Result<JoinHandle<Result<(), MonitorError>>, MonitorError> {
     let trigger = config
@@ -42,6 +47,7 @@ pub(crate) fn spawn_profiler_monitor(
             }
             run_profiler(
                 &control,
+                &coordinator,
                 identity,
                 trigger,
                 output,
@@ -55,31 +61,38 @@ pub(crate) fn spawn_profiler_monitor(
 
 fn run_profiler(
     control: &MonitorControl,
+    coordinator: &DumpCoordinator,
     identity: ProcessIdentity,
     trigger: DotNetTrigger,
     output: crate::config::OutputSpec,
     dump_count: u32,
     exception_filter: Option<std::ffi::OsString>,
 ) -> Result<(), ProfilerError> {
+    crate::engine::ensure_writable_directory(&output.directory)
+        .map_err(|error| ProfilerError::OutputDirectory(error.to_string()))?;
     let procdump_pid = std::process::id();
     let directory = temporary_directory().join("procdump");
-    fs::create_dir_all(&directory).map_err(ProfilerError::CreateDirectory)?;
+    prepare_profiler_directory(&directory)?;
     let profiler_path = directory.join("procdumpprofiler.so");
-    extract_profiler(&profiler_path)?;
-    prepare_profiler_log();
+    extract_profiler(&directory, &profiler_path, procdump_pid)?;
 
     let socket_path = directory.join(format!(
         "procdump-status-{procdump_pid}-{}",
         identity.pid.get()
     ));
+    let ready_path = directory.join(format!(
+        "procdump-ready-{procdump_pid}-{}",
+        identity.pid.get()
+    ));
     remove_socket(&socket_path);
+    remove_socket(&ready_path);
     let listener = UnixListener::bind(&socket_path).map_err(ProfilerError::BindStatus)?;
-    fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o777))
+    fs::set_permissions(&socket_path, fs::Permissions::from_mode(STATUS_SOCKET_MODE))
         .map_err(ProfilerError::StatusPermissions)?;
     listener
         .set_nonblocking(true)
         .map_err(ProfilerError::ConfigureStatus)?;
-    let _socket_guard = SocketGuard(socket_path.clone());
+    let _socket_guard = SocketGuard(vec![socket_path.clone(), ready_path.clone()]);
 
     let dump_path = if let Some(name) = output.file_name {
         output.directory.join(name).to_string_lossy().into_owned()
@@ -98,26 +111,31 @@ fn run_profiler(
     )?;
     attach_profiler(identity, &profiler_path, client_data.as_bytes())?;
 
-    let mut collected = 0_u32;
     while !control.is_quit_requested() {
         match listener.accept() {
-            Ok((mut stream, _)) => match read_status(&mut stream)? {
-                ProfilerStatus::Dump(path) => {
-                    println!("Core dump generated: {}", path.display());
-                    collected += 1;
-                    if collected >= dump_count {
-                        control.request_quit();
-                        return Ok(());
+            Ok((mut stream, _)) => match peer_pid(&stream)? {
+                pid if pid != identity.pid.get() => continue,
+                _ => match read_status(&mut stream)? {
+                    ProfilerStatus::Dump(path) => {
+                        if !coordinator.record_external_dump(&path) {
+                            return Ok(());
+                        }
                     }
-                }
-                ProfilerStatus::Health => {}
-                ProfilerStatus::Failure(path) => {
-                    return Err(ProfilerError::ProfilerFailure(path));
-                }
+                    ProfilerStatus::Health => mark_profiler_ready(&ready_path)?,
+                    ProfilerStatus::Failure(path) => {
+                        return Err(ProfilerError::ProfilerFailure(path));
+                    }
+                },
             },
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 if unsafe { libc::kill(identity.pid.get(), 0) } == -1 {
-                    return Err(ProfilerError::TargetExited);
+                    let error = io::Error::last_os_error();
+                    if error.raw_os_error() == Some(libc::ESRCH) {
+                        return Err(ProfilerError::TargetExited);
+                    }
+                    if error.raw_os_error() != Some(libc::EPERM) {
+                        return Err(ProfilerError::TargetCheck(error));
+                    }
                 }
                 thread::sleep(Duration::from_millis(25));
             }
@@ -127,23 +145,71 @@ fn run_profiler(
     Ok(())
 }
 
-fn extract_profiler(path: &Path) -> Result<(), ProfilerError> {
-    let mut file = File::create(path).map_err(ProfilerError::Extract)?;
+fn prepare_profiler_directory(path: &Path) -> Result<(), ProfilerError> {
+    match fs::create_dir(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(ProfilerError::CreateDirectory(error)),
+    }
+    let metadata = fs::symlink_metadata(path).map_err(ProfilerError::CreateDirectory)?;
+    let effective_uid = unsafe { libc::geteuid() };
+    if !metadata.file_type().is_dir() || metadata.uid() != effective_uid {
+        return Err(ProfilerError::UnsafeDirectory(path.to_path_buf()));
+    }
+    fs::set_permissions(path, fs::Permissions::from_mode(PROFILER_DIRECTORY_MODE))
+        .map_err(ProfilerError::CreateDirectory)
+}
+
+fn extract_profiler(directory: &Path, path: &Path, process_id: u32) -> Result<(), ProfilerError> {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temporary = directory.join(format!(".procdumpprofiler-{process_id}-{nonce}.tmp"));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(PROFILER_FILE_MODE)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(&temporary)
+        .map_err(ProfilerError::Extract)?;
     file.write_all(PROFILER_BYTES)
         .map_err(ProfilerError::Extract)?;
     file.flush().map_err(ProfilerError::Extract)?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o744)).map_err(ProfilerError::Extract)
+    file.sync_all().map_err(ProfilerError::Extract)?;
+    fs::rename(&temporary, path).map_err(ProfilerError::Extract)
 }
 
-fn prepare_profiler_log() {
-    let path = Path::new("/var/tmp/procdumpprofiler.log");
-    if OpenOptions::new()
-        .create(true)
-        .append(true)
+fn mark_profiler_ready(path: &Path) -> Result<(), ProfilerError> {
+    match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
         .open(path)
-        .is_ok()
     {
-        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o666));
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(ProfilerError::ReadyMarker(error)),
+    }
+}
+
+fn peer_pid(stream: &UnixStream) -> Result<i32, ProfilerError> {
+    let mut credentials = unsafe { std::mem::zeroed::<libc::ucred>() };
+    let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let result = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&raw mut credentials).cast(),
+            &raw mut length,
+        )
+    };
+    if result == -1 || length as usize != std::mem::size_of::<libc::ucred>() {
+        Err(ProfilerError::PeerCredentials(io::Error::last_os_error()))
+    } else {
+        Ok(credentials.pid)
     }
 }
 
@@ -152,11 +218,18 @@ fn attach_profiler(
     profiler_path: &Path,
     client_data: &[u8],
 ) -> Result<(), ProfilerError> {
-    let socket = crate::internal::find_diagnostics_socket(identity.pid.get())
+    let socket = crate::dotnet::find_diagnostics_socket(identity.pid.get())
         .map_err(|error| ProfilerError::Diagnostics(error.to_string()))?
         .ok_or(ProfilerError::NotManaged)?;
     let packet = build_attach_packet(profiler_path, client_data)?;
     let mut stream = UnixStream::connect(&socket).map_err(ProfilerError::ConnectDiagnostics)?;
+    let timeout = Some(Duration::from_secs(5));
+    stream
+        .set_read_timeout(timeout)
+        .map_err(ProfilerError::ConfigureDiagnostics)?;
+    stream
+        .set_write_timeout(timeout)
+        .map_err(ProfilerError::ConfigureDiagnostics)?;
     stream
         .write_all(&packet)
         .map_err(ProfilerError::SendAttach)?;
@@ -253,7 +326,12 @@ fn encode_exception_filter(
     filter: Option<&std::ffi::OsStr>,
     dump_count: u32,
 ) -> Result<String, ProfilerError> {
-    let filter = filter.and_then(std::ffi::OsStr::to_str).unwrap_or("*");
+    let filter = match filter {
+        None => "*",
+        Some(filter) => filter
+            .to_str()
+            .ok_or(ProfilerError::InvalidExceptionFilter)?,
+    };
     let mut encoded = String::new();
     for value in filter.split(',') {
         if value.is_empty() {
@@ -315,11 +393,13 @@ fn remove_socket(path: &Path) {
     }
 }
 
-struct SocketGuard(PathBuf);
+struct SocketGuard(Vec<PathBuf>);
 
 impl Drop for SocketGuard {
     fn drop(&mut self) {
-        remove_socket(&self.0);
+        for path in &self.0 {
+            remove_socket(path);
+        }
     }
 }
 
@@ -331,15 +411,20 @@ enum ProfilerStatus {
 
 #[derive(Debug)]
 enum ProfilerError {
+    OutputDirectory(String),
     CreateDirectory(io::Error),
+    UnsafeDirectory(PathBuf),
     Extract(io::Error),
+    ReadyMarker(io::Error),
     BindStatus(io::Error),
     StatusPermissions(io::Error),
     ConfigureStatus(io::Error),
+    PeerCredentials(io::Error),
     AcceptStatus(io::Error),
     ReadStatus(io::Error),
     Diagnostics(String),
     ConnectDiagnostics(io::Error),
+    ConfigureDiagnostics(io::Error),
     SendAttach(io::Error),
     ReceiveAttach(io::Error),
     InvalidProfilerPath(PathBuf),
@@ -352,15 +437,28 @@ enum ProfilerError {
     ProfilerFailure(PathBuf),
     NotManaged,
     TargetExited,
+    TargetCheck(io::Error),
 }
 
 impl std::fmt::Display for ProfilerError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::OutputDirectory(error) => formatter.write_str(error),
             Self::CreateDirectory(error) => {
                 write!(formatter, "failed to create profiler directory: {error}")
             }
+            Self::UnsafeDirectory(path) => write!(
+                formatter,
+                "profiler directory is not a trusted owned directory: {}",
+                path.display()
+            ),
             Self::Extract(error) => write!(formatter, "failed to extract profiler: {error}"),
+            Self::ReadyMarker(error) => {
+                write!(
+                    formatter,
+                    "failed to create profiler readiness marker: {error}"
+                )
+            }
             Self::BindStatus(error) => {
                 write!(formatter, "failed to bind profiler status socket: {error}")
             }
@@ -372,6 +470,12 @@ impl std::fmt::Display for ProfilerError {
                 formatter,
                 "failed to configure profiler status socket: {error}"
             ),
+            Self::PeerCredentials(error) => {
+                write!(
+                    formatter,
+                    "failed to authenticate profiler status peer: {error}"
+                )
+            }
             Self::AcceptStatus(error) => {
                 write!(formatter, "failed to accept profiler status: {error}")
             }
@@ -380,6 +484,10 @@ impl std::fmt::Display for ProfilerError {
             Self::ConnectDiagnostics(error) => write!(
                 formatter,
                 "failed to connect to .NET diagnostics socket: {error}"
+            ),
+            Self::ConfigureDiagnostics(error) => write!(
+                formatter,
+                "failed to configure .NET diagnostics socket: {error}"
             ),
             Self::SendAttach(error) => {
                 write!(formatter, "failed to send profiler attach request: {error}")
@@ -416,6 +524,9 @@ impl std::fmt::Display for ProfilerError {
                 formatter,
                 "target process exited during profiler monitoring"
             ),
+            Self::TargetCheck(error) => {
+                write!(formatter, "failed to inspect target process: {error}")
+            }
         }
     }
 }
@@ -425,6 +536,8 @@ impl std::error::Error for ProfilerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::ffi::OsStringExt;
+    use std::os::unix::fs::symlink;
 
     #[test]
     fn exception_client_data_matches_profiler_grammar() {
@@ -457,5 +570,37 @@ mod tests {
             .unwrap(),
             "7;/tmp/dumps/;42;3;10;20;30"
         );
+    }
+
+    #[test]
+    fn profiler_directory_refuses_symlink() {
+        let root =
+            std::env::temp_dir().join(format!("procdump-profiler-security-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir(&root).unwrap();
+        let actual = root.join("actual");
+        let link = root.join("link");
+        fs::create_dir(&actual).unwrap();
+        symlink(&actual, &link).unwrap();
+
+        let error = prepare_profiler_directory(&link).unwrap_err();
+        assert!(matches!(error, ProfilerError::UnsafeDirectory(path) if path == link));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn exception_filter_rejects_non_utf8_input() {
+        let filter = std::ffi::OsString::from_vec(vec![b'*', 0xff]);
+
+        let error = encode_exception_filter(Some(&filter), 1).unwrap_err();
+
+        assert!(matches!(error, ProfilerError::InvalidExceptionFilter));
+    }
+
+    #[test]
+    fn peer_credentials_identify_connecting_process() {
+        let (stream, _peer) = UnixStream::pair().unwrap();
+
+        assert_eq!(peer_pid(&stream).unwrap(), std::process::id() as i32);
     }
 }

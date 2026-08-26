@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 procdump = { path = "../procdump", features = ["full"] }
+signal-hook.workspace = true
 
 [lints]
 workspace = true

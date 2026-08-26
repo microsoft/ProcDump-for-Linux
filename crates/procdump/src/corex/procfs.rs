@@ -3,8 +3,6 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::os::unix::fs::FileExt;
 
-const MAX_MAPPINGS: usize = 4096;
-const MAX_THREADS: usize = 1024;
 const PF_X: u32 = 1;
 const PF_W: u32 = 2;
 const PF_R: u32 = 4;
@@ -22,9 +20,6 @@ pub(super) fn enumerate_threads(pid: i32) -> Result<Vec<i32>, CorexError> {
             .filter(|tid| *tid > 0)
         {
             tids.push(tid);
-            if tids.len() >= MAX_THREADS {
-                break;
-            }
         }
     }
     tids.sort_unstable_by_key(|tid| (*tid != pid, *tid));
@@ -53,6 +48,7 @@ pub(super) fn read_process(pid: i32) -> Result<ProcessInfo, CorexError> {
         mappings: read_maps(pid)?,
         auxv: read_limited(format!("/proc/{pid}/auxv"), 4096)?,
         coredump_filter: read_coredump_filter(pid),
+        page_size: page_size()?,
         tids: enumerate_threads(pid)?,
     })
 }
@@ -99,9 +95,6 @@ fn read_maps(pid: i32) -> Result<Vec<Mapping>, CorexError> {
         fs::read_to_string(&path).map_err(|source| CorexError::io("read", &path, source))?;
     let mut mappings = Vec::new();
     for line in contents.lines() {
-        if mappings.len() >= MAX_MAPPINGS {
-            break;
-        }
         if let Some(mapping) = parse_mapping(line) {
             mappings.push(mapping);
         }
@@ -212,6 +205,17 @@ fn read_coredump_filter(pid: i32) -> u32 {
         .ok()
         .and_then(|value| u32::from_str_radix(value.trim(), 16).ok())
         .unwrap_or(0x33)
+}
+
+fn page_size() -> Result<u64, CorexError> {
+    let value = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    if value <= 0 {
+        Err(CorexError::InvalidData(
+            "unable to determine system page size".into(),
+        ))
+    } else {
+        Ok(value as u64)
+    }
 }
 
 fn has_elf_magic(memory: &File, address: u64) -> bool {

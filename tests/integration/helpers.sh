@@ -85,17 +85,19 @@ function waitforprocdumpsocket {
   echo "ProcDump .NET status socket found"
   result=$socketpath
 
-  # wait for profile to be initialized
-  search="Initialization complete (procdumppid=${procdumpchildpid},targetpid=${testchildpid})"
-  (timeout "10s" tail -F -n +1 "/var/tmp/procdumpprofiler.log" &) | grep -q "$search"
-  if [ $? -eq 0 ]; then
-      result=$socketpath
-      return
-  else
-      echo "Timeout reached. Unable to find '$search' in '/var/tmp/procdumpprofiler.log'"
-      result=-1
-      return
-  fi
+  readypath=$tmpfolder"/procdump/procdump-ready-"$procdumpchildpid"-"$testchildpid
+  i=0
+  while [ ! -f "$readypath" ]
+  do
+      ((i=i+1))
+      if [[ "$i" -gt $MAX_WAIT ]]; then
+        echo "Profiler readiness marker not available within allotted time"
+        result=-1
+        return
+      fi
+      sleep 1s
+  done
+  result=$socketpath
 }
 
 #

@@ -54,10 +54,27 @@ struct
 struct
 {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-	__uint(max_entries, 512);
+    __uint(max_entries, 1);
 	__type(key, int);
 	__type(value, struct ResourceInformation);
 } heapStorage SEC(".maps");
+
+// Sampling counters are per CPU so concurrent probes never race on a global.
+struct
+{
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, int);
+    __type(value, int);
+} sampleCounts SEC(".maps");
+
+struct
+{
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, int);
+    __type(value, __u64);
+} eventStats SEC(".maps");
 
 //
 // The ring buffer we use to communicate with user space

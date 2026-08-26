@@ -11,7 +11,8 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const IPC_HEADER_SIZE: usize = 20;
-const MAX_BLOCK_SIZE: usize = 64 * 1024 * 1024;
+const MAX_BLOCK_SIZE: usize = 16 * 1024 * 1024;
+const MAX_METADATA_ENTRIES: usize = 16 * 1024;
 const METRICS_PROVIDER: &str = "System.Diagnostics.Metrics";
 const BEGIN_OBJECT: u8 = 5;
 const END_OBJECT: u8 = 6;
@@ -32,15 +33,23 @@ pub(crate) fn spawn_counter_monitor(
             if control.wait_for_start() == WaitOutcome::Quit {
                 return Ok(());
             }
-            run_counter_monitor(
+            match run_counter_monitor(
                 &control,
                 &coordinator,
                 identity,
                 &triggers,
                 interval,
                 snooze,
-            )
-            .map_err(|error| MonitorError::EventPipe(error.to_string()))
+            ) {
+                Ok(()) => Ok(()),
+                Err(EventPipeError::Read(error))
+                    if control.is_quit_requested()
+                        && error.kind() == io::ErrorKind::Interrupted =>
+                {
+                    Ok(())
+                }
+                Err(error) => Err(MonitorError::EventPipe(error.to_string())),
+            }
         })
         .map_err(MonitorError::Spawn)
 }
@@ -53,7 +62,7 @@ fn run_counter_monitor(
     interval: Duration,
     snooze: Duration,
 ) -> Result<(), EventPipeError> {
-    let socket = crate::internal::find_diagnostics_socket(identity.pid.get())
+    let socket = crate::dotnet::find_diagnostics_socket(identity.pid.get())
         .map_err(|error| EventPipeError::Diagnostics(error.to_string()))?
         .ok_or(EventPipeError::NotManaged)?;
     let providers = unique_providers(triggers);
@@ -68,7 +77,17 @@ fn run_counter_monitor(
     let command =
         build_collect_command(&providers, interval.as_secs().max(1) as u32, &session_key)?;
     let mut stream = UnixStream::connect(&socket).map_err(EventPipeError::Connect)?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(100)))
+        .map_err(EventPipeError::Connect)?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(5)))
+        .map_err(EventPipeError::Connect)?;
     stream.write_all(&command).map_err(EventPipeError::Send)?;
+    let mut stream = CancellableReader {
+        stream: &mut stream,
+        control,
+    };
     let mut response = [0_u8; IPC_HEADER_SIZE];
     stream
         .read_exact(&mut response)
@@ -109,7 +128,7 @@ fn run_counter_monitor(
         let outer = match read_u8(&mut stream) {
             Ok(value) => value,
             Err(EventPipeError::Read(error)) if error.kind() == io::ErrorKind::UnexpectedEof => {
-                return Ok(());
+                return Err(EventPipeError::Disconnected);
             }
             Err(error) => return Err(error),
         };
@@ -207,7 +226,9 @@ fn evaluate_counter(
         if trigger.provider.eq_ignore_ascii_case(&value.provider)
             && trigger.counter.eq_ignore_ascii_case(&value.counter)
         {
-            let comparison = value.value_for(trigger.percentile.unwrap_or(0.5));
+            let Some(comparison) = value.value_for(trigger.percentile) else {
+                continue;
+            };
             if !comparison.is_finite() {
                 continue;
             }
@@ -217,9 +238,12 @@ fn evaluate_counter(
                 comparison >= trigger.threshold
             };
             if triggered {
-                println!(
-                    "Trigger: {}:{} value:{comparison:.4} threshold:{:.4} on process ID: {}",
-                    value.provider, value.counter, trigger.threshold, pid
+                crate::diagnostics::info(
+                    coordinator.diagnostics,
+                    format!(
+                        "Trigger: {}:{} value:{comparison:.4} threshold:{:.4} on process ID: {}",
+                        value.provider, value.counter, trigger.threshold, pid
+                    ),
                 );
                 coordinator
                     .write(DumpKind::PerformanceCounter)
@@ -307,7 +331,10 @@ struct ParserState {
 impl ParserState {
     fn register_metadata(&mut self, _header_metadata_id: u32, payload: &[u8]) {
         let mut cursor = Cursor::new(payload);
-        let Some(metadata_id) = cursor.read_i32().map(|value| value as u32) else {
+        let Some(metadata_id) = cursor
+            .read_i32()
+            .and_then(|value| u32::try_from(value).ok())
+        else {
             return;
         };
         let Some(provider) = cursor.read_utf16() else {
@@ -319,8 +346,10 @@ impl ParserState {
         let Some(event) = cursor.read_utf16() else {
             return;
         };
-        self.metadata
-            .insert(metadata_id, Metadata { provider, event });
+        if self.metadata.len() < MAX_METADATA_ENTRIES || self.metadata.contains_key(&metadata_id) {
+            self.metadata
+                .insert(metadata_id, Metadata { provider, event });
+        }
     }
 
     fn parse_event(&self, metadata_id: u32, payload: &[u8]) -> Option<CounterValue> {
@@ -349,11 +378,15 @@ struct CounterValue {
 }
 
 impl CounterValue {
-    fn value_for(&self, percentile: f64) -> f64 {
-        self.quantiles
-            .iter()
-            .find(|(key, _)| (*key - percentile).abs() < 0.001)
-            .map_or(self.value, |(_, value)| *value)
+    fn value_for(&self, percentile: Option<f64>) -> Option<f64> {
+        match percentile {
+            None => Some(self.value),
+            Some(percentile) => self
+                .quantiles
+                .iter()
+                .find(|(key, _)| (*key - percentile).abs() < 0.001)
+                .map(|(_, value)| *value),
+        }
     }
 }
 
@@ -593,8 +626,14 @@ impl<'a> Cursor<'a> {
         let mut result = 0_u32;
         for shift in (0..35).step_by(7) {
             let byte = self.read_u8()?;
+            if shift == 28 && (byte & 0xf0) != 0 {
+                return None;
+            }
             result |= u32::from(byte & 0x7f) << shift;
             if byte & 0x80 == 0 {
+                if shift > 0 && byte == 0 {
+                    return None;
+                }
                 return Some(result);
             }
         }
@@ -604,12 +643,46 @@ impl<'a> Cursor<'a> {
         let mut result = 0_u64;
         for shift in (0..70).step_by(7) {
             let byte = self.read_u8()?;
+            if shift == 63 && (byte & 0xfe) != 0 {
+                return None;
+            }
             result |= u64::from(byte & 0x7f) << shift;
             if byte & 0x80 == 0 {
+                if shift > 0 && byte == 0 {
+                    return None;
+                }
                 return Some(result);
             }
         }
         None
+    }
+}
+
+struct CancellableReader<'a> {
+    stream: &'a mut UnixStream,
+    control: &'a MonitorControl,
+}
+
+impl Read for CancellableReader<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        loop {
+            if self.control.is_quit_requested() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "EventPipe monitoring cancelled",
+                ));
+            }
+            match self.stream.read(buffer) {
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::TimedOut
+                            | io::ErrorKind::WouldBlock
+                            | io::ErrorKind::Interrupted
+                    ) => {}
+                result => return result,
+            }
+        }
     }
 }
 
@@ -671,6 +744,7 @@ enum EventPipeError {
     InvalidUtf8,
     PacketTooLarge,
     Dump(String),
+    Disconnected,
 }
 
 impl std::fmt::Display for EventPipeError {
@@ -708,6 +782,7 @@ impl std::fmt::Display for EventPipeError {
             Self::InvalidUtf8 => write!(formatter, "invalid serialized UTF-8 string"),
             Self::PacketTooLarge => write!(formatter, "EventPipe request is too large"),
             Self::Dump(error) => formatter.write_str(error),
+            Self::Disconnected => write!(formatter, "EventPipe stream disconnected unexpectedly"),
         }
     }
 }
@@ -756,7 +831,8 @@ mod tests {
         payload.extend(utf16("0.5=1.0;0.95=2.0"));
 
         let value = parse_metrics_event(&payload, "HistogramValuePublished", "session").unwrap();
-        assert_eq!(value.value_for(0.95), 2.0);
+        assert_eq!(value.value_for(Some(0.95)), Some(2.0));
+        assert_eq!(value.value_for(Some(0.99)), None);
     }
 
     #[test]
@@ -770,5 +846,81 @@ mod tests {
                 .windows(METRICS_PROVIDER.len())
                 .any(|window| window == METRICS_PROVIDER.as_bytes())
         );
+    }
+
+    #[test]
+    fn rejects_negative_metadata_id() {
+        let mut payload = (-1_i32).to_le_bytes().to_vec();
+        payload.extend(utf16("provider"));
+        payload.extend_from_slice(&1_i32.to_le_bytes());
+        payload.extend(utf16("event"));
+        let mut parser = ParserState {
+            metadata: HashMap::new(),
+            metrics_session_id: "session".into(),
+        };
+
+        parser.register_metadata(0, &payload);
+
+        assert!(parser.metadata.is_empty());
+    }
+
+    #[test]
+    fn rejects_overflowing_and_overlong_varints() {
+        assert!(
+            Cursor::new(&[0xff, 0xff, 0xff, 0xff, 0x10])
+                .read_var_u32()
+                .is_none()
+        );
+        assert!(Cursor::new(&[0x80, 0x00]).read_var_u32().is_none());
+        assert!(
+            Cursor::new(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x02])
+                .read_var_u64()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn metadata_table_is_bounded() {
+        let mut parser = ParserState {
+            metadata: (0..MAX_METADATA_ENTRIES as u32)
+                .map(|id| {
+                    (
+                        id,
+                        Metadata {
+                            provider: "existing".into(),
+                            event: "event".into(),
+                        },
+                    )
+                })
+                .collect(),
+            metrics_session_id: "session".into(),
+        };
+        let mut payload = (MAX_METADATA_ENTRIES as i32 + 1).to_le_bytes().to_vec();
+        payload.extend(utf16("provider"));
+        payload.extend_from_slice(&1_i32.to_le_bytes());
+        payload.extend(utf16("event"));
+
+        parser.register_metadata(0, &payload);
+
+        assert_eq!(parser.metadata.len(), MAX_METADATA_ENTRIES);
+    }
+
+    #[test]
+    fn cancellable_reader_interrupts_blocking_read() {
+        let (mut reader, _writer) = UnixStream::pair().unwrap();
+        reader
+            .set_read_timeout(Some(Duration::from_millis(10)))
+            .unwrap();
+        let control = MonitorControl::new();
+        control.request_quit();
+        let mut reader = CancellableReader {
+            stream: &mut reader,
+            control: &control,
+        };
+        let mut byte = [0_u8; 1];
+
+        let error = reader.read(&mut byte).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
     }
 }

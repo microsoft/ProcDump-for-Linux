@@ -4,12 +4,16 @@ use crate::WriteDumpError;
 use std::fs;
 #[cfg(target_os = "linux")]
 use std::path::PathBuf;
+#[cfg(target_os = "linux")]
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 pub(crate) struct CoreDumpMaskGuard {
     #[cfg(target_os = "linux")]
     path: Option<PathBuf>,
     #[cfg(target_os = "linux")]
     previous: Option<u32>,
+    #[cfg(target_os = "linux")]
+    _lock: Option<MutexGuard<'static, ()>>,
 }
 
 impl CoreDumpMaskGuard {
@@ -19,8 +23,12 @@ impl CoreDumpMaskGuard {
             return Ok(Self {
                 path: None,
                 previous: None,
+                _lock: None,
             });
         };
+        let lock = mask_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let path = PathBuf::from(format!("/proc/{pid}/coredump_filter"));
         let previous_text = fs::read_to_string(&path).map_err(|source| WriteDumpError::Io {
             operation: "read",
@@ -42,7 +50,25 @@ impl CoreDumpMaskGuard {
         Ok(Self {
             path: Some(path),
             previous: Some(previous),
+            _lock: Some(lock),
         })
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn restore(&mut self) -> Result<(), WriteDumpError> {
+        let (Some(path), Some(previous)) = (&self.path, self.previous.take()) else {
+            return Ok(());
+        };
+        fs::write(path, mask_value(previous)).map_err(|source| WriteDumpError::Io {
+            operation: "restore",
+            path: path.clone(),
+            source,
+        })
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub(crate) fn restore(&mut self) -> Result<(), WriteDumpError> {
+        Ok(())
     }
 
     #[cfg(target_os = "macos")]
@@ -63,10 +89,21 @@ impl CoreDumpMaskGuard {
 impl Drop for CoreDumpMaskGuard {
     fn drop(&mut self) {
         #[cfg(target_os = "linux")]
-        if let (Some(path), Some(previous)) = (&self.path, self.previous) {
-            let _ = fs::write(path, mask_value(previous));
+        if let (Some(path), Some(previous)) = (&self.path, self.previous.take()) {
+            if let Err(error) = fs::write(path, mask_value(previous)) {
+                eprintln!(
+                    "warning: failed to restore core dump mask for {}: {error}",
+                    path.display()
+                );
+            }
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn mask_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 #[cfg(target_os = "linux")]

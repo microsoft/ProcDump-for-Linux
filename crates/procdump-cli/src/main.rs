@@ -1,9 +1,13 @@
 use procdump::config::{self, Platform};
 use procdump::dump::PlatformDumpBackend;
 use procdump::orchestrator::monitor_processes;
+use procdump::sync::MonitorControl;
+use signal_hook::consts::{SIGINT, SIGTERM};
+use signal_hook::iterator::Signals;
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::thread;
 
 #[cfg(target_os = "linux")]
 use procdump::process::linux::LinuxProcfs as NativeProcesses;
@@ -29,21 +33,36 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             format!("{error}\n{}", usage())
         }
     })?;
-    let dump_uses_native_backend = config.dotnet_trigger.is_none()
-        && config.perf_counters.is_empty()
-        && !config
-            .restrack
-            .as_ref()
-            .is_some_and(|restrack| !restrack.generate_dump);
+    let dump_uses_native_backend = config.requires_gcore_preflight();
     if dump_uses_native_backend && !command_on_path("gcore") {
         let message = "failed to locate gcore binary in $PATH. Check that gdb/gcore is installed and configured on your system.";
         println!("{message}");
         return Err(message.into());
     }
     let processes = Arc::new(NativeProcesses::new()?);
+    let shutdown = Arc::new(MonitorControl::new());
+    let signal_control = Arc::clone(&shutdown);
+    let mut signals = Signals::new([SIGINT, SIGTERM])?;
+    let handle = signals.handle();
+    let signal_thread = thread::Builder::new()
+        .name("shutdown signal monitor".into())
+        .spawn(move || {
+            if signals.forever().next().is_some() {
+                signal_control.request_quit();
+            }
+        })?;
 
     println!("ProcDump for Rust");
-    monitor_processes(&config, platform, processes, Arc::new(PlatformDumpBackend))?;
+    let result = monitor_processes(
+        &config,
+        platform,
+        processes,
+        Arc::new(PlatformDumpBackend),
+        shutdown,
+    );
+    handle.close();
+    let _ = signal_thread.join();
+    result?;
     Ok(())
 }
 

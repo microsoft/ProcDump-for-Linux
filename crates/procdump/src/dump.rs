@@ -3,9 +3,10 @@ use crate::process::ProcessId;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+pub(crate) use crate::engine::CancellationToken;
 pub use crate::engine::{DumpError, DumpKind};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct DumpRequest {
     pub pid: ProcessId,
     pub process_name: OsString,
@@ -14,6 +15,8 @@ pub struct DumpRequest {
     pub overwrite: bool,
     pub use_gcore: bool,
     pub platform: Platform,
+    pub(crate) cancellation: Option<CancellationToken>,
+    pub core_dump_mask: Option<u32>,
 }
 
 pub trait DumpBackend: Send + Sync {
@@ -64,5 +67,7 @@ fn to_internal_request(request: &DumpRequest) -> crate::engine::DumpRequest {
             Platform::Linux => crate::engine::Platform::Linux,
             Platform::MacOs => crate::engine::Platform::MacOs,
         },
+        cancellation: request.cancellation.clone(),
+        core_dump_mask: request.core_dump_mask,
     }
 }

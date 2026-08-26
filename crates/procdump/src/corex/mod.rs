@@ -4,6 +4,7 @@ mod procfs;
 mod ptrace;
 
 use std::fmt;
+use std::fs::File;
 use std::path::Path;
 
 #[derive(Clone, Debug)]
@@ -32,6 +33,7 @@ pub(super) struct ProcessInfo {
     pub mappings: Vec<Mapping>,
     pub auxv: Vec<u8>,
     pub coredump_filter: u32,
+    pub page_size: u64,
     pub tids: Vec<i32>,
 }
 
@@ -43,14 +45,27 @@ pub(super) struct ThreadState {
     pub pac_mask: Option<[u64; 2]>,
 }
 
-pub(crate) fn dump_pid(pid: i32, path: &Path) -> Result<(), CorexError> {
-    let attached = ptrace::AttachedThreads::attach_process(pid)?;
+pub(crate) fn dump_pid(
+    pid: i32,
+    path: &Path,
+    output: File,
+    cancellation: Option<&crate::engine::CancellationToken>,
+) -> Result<(), CorexError> {
+    let attached = ptrace::AttachedThreads::attach_process(pid, cancellation)?;
     let mut process = procfs::read_process(pid)?;
     process.tids = attached.tids().to_vec();
     procfs::apply_coredump_filter(&mut process)?;
-    let threads = ptrace::read_thread_states(attached.tids())?;
+    let threads = ptrace::read_thread_states(attached.tids(), cancellation)?;
     let notes = notes::build(&process, &threads)?;
-    elf::write(path, &process, &notes)
+    let write_result = elf::write(path, output, &process, &notes, cancellation);
+    let detach_result = attached.finish();
+    match (write_result, detach_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(write_error), Err(detach_error)) => Err(CorexError::InvalidData(format!(
+            "{write_error}; additionally, cleanup failed: {detach_error}"
+        ))),
+    }
 }
 
 #[derive(Debug)]
@@ -62,6 +77,7 @@ pub(crate) enum CorexError {
     },
     InvalidData(String),
     Ptrace(String),
+    Cancelled,
 }
 
 impl CorexError {
@@ -87,6 +103,7 @@ impl fmt::Display for CorexError {
                 source,
             } => write!(formatter, "failed to {operation} {path}: {source}"),
             Self::InvalidData(message) | Self::Ptrace(message) => formatter.write_str(message),
+            Self::Cancelled => formatter.write_str("core dump generation was cancelled"),
         }
     }
 }

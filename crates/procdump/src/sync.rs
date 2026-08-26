@@ -1,3 +1,5 @@
+use crate::engine::CancellationToken;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -18,6 +20,7 @@ struct ControlState {
 pub struct MonitorControl {
     state: Mutex<ControlState>,
     changed: Condvar,
+    cancellation: CancellationToken,
 }
 
 impl MonitorControl {
@@ -32,22 +35,27 @@ impl MonitorControl {
     }
 
     pub fn request_quit(&self) {
+        self.cancellation.cancel();
         let mut state = self.lock_state();
         state.quit = true;
         self.changed.notify_all();
     }
 
     pub fn is_quit_requested(&self) -> bool {
-        self.lock_state().quit
+        self.cancellation.is_cancelled()
+    }
+
+    pub(crate) fn cancellation_token(&self) -> CancellationToken {
+        self.cancellation.clone()
     }
 
     pub fn wait_for_start(&self) -> WaitOutcome {
         let mut state = self.lock_state();
         while !state.started && !state.quit {
-            state = self
-                .changed
-                .wait(state)
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state = self.changed.wait(state).unwrap_or_else(|poisoned| {
+                self.cancellation.cancel();
+                poisoned.into_inner()
+            });
         }
         if state.quit {
             WaitOutcome::Quit
@@ -64,7 +72,10 @@ impl MonitorControl {
         let (state, _) = self
             .changed
             .wait_timeout_while(state, duration, |state| !state.quit)
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(|poisoned| {
+                self.cancellation.cancel();
+                poisoned.into_inner()
+            });
         if state.quit {
             WaitOutcome::Quit
         } else {
@@ -73,9 +84,10 @@ impl MonitorControl {
     }
 
     fn lock_state(&self) -> MutexGuard<'_, ControlState> {
-        self.state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.state.lock().unwrap_or_else(|poisoned| {
+            self.cancellation.cancel();
+            poisoned.into_inner()
+        })
     }
 }
 
@@ -83,6 +95,7 @@ impl MonitorControl {
 pub struct DumpGate {
     active: Mutex<bool>,
     available: Condvar,
+    poisoned: AtomicBool,
 }
 
 impl DumpGate {
@@ -91,10 +104,15 @@ impl DumpGate {
     }
 
     pub fn acquire<'a>(&'a self, control: &MonitorControl) -> Option<DumpPermit<'a>> {
-        let mut active = self
-            .active
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if self.poisoned.load(Ordering::Acquire) {
+            control.request_quit();
+            return None;
+        }
+        let mut active = self.active.lock().unwrap_or_else(|poisoned| {
+            self.poisoned.store(true, Ordering::Release);
+            control.request_quit();
+            poisoned.into_inner()
+        });
         while *active {
             if control.is_quit_requested() {
                 return None;
@@ -102,7 +120,11 @@ impl DumpGate {
             let (next, _) = self
                 .available
                 .wait_timeout(active, Duration::from_millis(50))
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                .unwrap_or_else(|poisoned| {
+                    self.poisoned.store(true, Ordering::Release);
+                    control.request_quit();
+                    poisoned.into_inner()
+                });
             active = next;
         }
         if control.is_quit_requested() {
@@ -120,11 +142,10 @@ pub struct DumpPermit<'a> {
 
 impl Drop for DumpPermit<'_> {
     fn drop(&mut self) {
-        let mut active = self
-            .gate
-            .active
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut active = self.gate.active.lock().unwrap_or_else(|poisoned| {
+            self.gate.poisoned.store(true, Ordering::Release);
+            poisoned.into_inner()
+        });
         *active = false;
         self.gate.available.notify_one();
     }

@@ -8,13 +8,15 @@ use crate::sync::{MonitorControl, WaitOutcome};
 use blazesym::Pid;
 use blazesym::symbolize::source::{Process, Source};
 use blazesym::symbolize::{Input, Symbolizer};
-use libbpf_rs::RingBufferBuilder;
 use libbpf_rs::skel::{OpenSkel, Skel, SkelBuilder};
+use libbpf_rs::{MapCore, MapFlags, RingBufferBuilder};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::mem::MaybeUninit;
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::MetadataExt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{SyncSender, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -36,7 +38,7 @@ struct Allocation {
     stack: Vec<u64>,
 }
 
-type Allocations = Arc<Mutex<HashMap<u64, Allocation>>>;
+type Allocations = Arc<Mutex<HashMap<u64, Arc<Allocation>>>>;
 
 pub(crate) struct RestrackRuntime {
     pub threads: Vec<JoinHandle<Result<(), MonitorError>>>,
@@ -45,9 +47,10 @@ pub(crate) struct RestrackRuntime {
 
 struct RestrackReporter {
     allocations: Allocations,
+    incomplete: Arc<AtomicBool>,
     config: RestrackConfig,
     request: DumpRequest,
-    writers: Mutex<Vec<JoinHandle<()>>>,
+    diagnostics: crate::config::DiagnosticsTarget,
 }
 
 impl DumpSidecar for RestrackReporter {
@@ -55,46 +58,38 @@ impl DumpSidecar for RestrackReporter {
         self.config.generate_dump
     }
 
-    fn write(&self, kind: DumpKind) -> Result<std::path::PathBuf, MonitorError> {
+    fn write(
+        &self,
+        kind: DumpKind,
+        primary_path: Option<&std::path::Path>,
+    ) -> Result<std::path::PathBuf, MonitorError> {
         let mut request = self.request.clone();
         request.kind = kind;
-        let path = sidecar_path(&request, "restrack")?;
-        let file = File::create(&path).map_err(|error| {
+        let path = restrack_path(&request, primary_path)?;
+        let file = crate::engine::open_output_file(&path, request.overwrite).map_err(|error| {
             MonitorError::Restrack(format!("failed to create {}: {error}", path.display()))
         })?;
-        let snapshot = self
-            .allocations
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
-        let report_path = path.clone();
-        let config = self.config.clone();
+        let snapshot = match self.allocations.lock() {
+            Ok(allocations) => allocations.clone(),
+            Err(poisoned) => {
+                self.incomplete.store(true, Ordering::Release);
+                poisoned.into_inner().clone()
+            }
+        };
         let pid = request.pid.get();
-        let writer = thread::Builder::new()
-            .name("restrack report writer".into())
-            .spawn(move || match render_report(file, pid, &config, snapshot) {
-                Ok(()) => println!("Leak report generated: {}", report_path.display()),
-                Err(error) => eprintln!("Failed to generate leak report: {error}"),
-            })
-            .map_err(MonitorError::Spawn)?;
-        self.writers
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .push(writer);
-        Ok(path)
-    }
-}
-
-impl Drop for RestrackReporter {
-    fn drop(&mut self) {
-        let writers = std::mem::take(
-            self.writers
-                .get_mut()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        render_report(
+            file,
+            pid,
+            &self.config,
+            snapshot,
+            self.incomplete.load(Ordering::Acquire),
+        )
+        .map_err(MonitorError::Restrack)?;
+        crate::diagnostics::info(
+            self.diagnostics,
+            format!("Leak report generated: {}", path.display()),
         );
-        for writer in writers {
-            let _ = writer.join();
-        }
+        Ok(path)
     }
 }
 
@@ -108,9 +103,11 @@ pub(crate) fn spawn_restrack_monitors(
         MonitorError::Restrack("resource tracking configuration is missing".into())
     })?;
     let allocations = Arc::new(Mutex::new(HashMap::new()));
+    let incomplete = Arc::new(AtomicBool::new(false));
     let (ready_tx, ready_rx) = sync_channel(1);
     let collector_control = Arc::clone(&control);
     let collector_allocations = Arc::clone(&allocations);
+    let collector_incomplete = Arc::clone(&incomplete);
     let pid = process.identity.pid.get();
     let sample_rate = restrack.sample_rate;
     let collector = thread::Builder::new()
@@ -121,6 +118,7 @@ pub(crate) fn spawn_restrack_monitors(
                 sample_rate,
                 collector_control,
                 collector_allocations,
+                collector_incomplete,
                 &ready_tx,
             );
             if let Err(error) = &result {
@@ -146,6 +144,7 @@ pub(crate) fn spawn_restrack_monitors(
 
     let reporter = Arc::new(RestrackReporter {
         allocations,
+        incomplete,
         config: restrack,
         request: DumpRequest {
             pid: process.identity.pid,
@@ -155,8 +154,10 @@ pub(crate) fn spawn_restrack_monitors(
             overwrite: config.overwrite,
             use_gcore: config.use_gcore,
             platform,
+            cancellation: None,
+            core_dump_mask: config.core_dump_mask,
         },
-        writers: Mutex::new(Vec::new()),
+        diagnostics: config.diagnostics,
     });
     let mut threads = vec![collector];
     if needs_manual_trigger(config) {
@@ -170,6 +171,7 @@ fn collect_events(
     sample_rate: u32,
     control: Arc<MonitorControl>,
     allocations: Allocations,
+    incomplete: Arc<AtomicBool>,
     ready: &SyncSender<Result<(), String>>,
 ) -> Result<(), String> {
     let namespace = std::fs::metadata(format!("/proc/{pid}/ns/pid"))
@@ -188,7 +190,6 @@ fn collect_events(
     bss.dev = namespace.dev() as u32;
     bss.inode = namespace.ino() as u32;
     bss.sampleRate = sample_rate as i32;
-    bss.currentSampleCount = 1;
 
     let mut skeleton = open_skeleton
         .load()
@@ -198,10 +199,11 @@ fn collect_events(
         .map_err(|error| format!("failed to attach the resource tracking eBPF probes: {error}"))?;
 
     let callback_allocations = Arc::clone(&allocations);
+    let callback_incomplete = Arc::clone(&incomplete);
     let mut ring_builder = RingBufferBuilder::new();
     ring_builder
         .add(&skeleton.maps.ringBuffer, move |data| {
-            handle_event(data, &callback_allocations);
+            handle_event(data, &callback_allocations, &callback_incomplete);
             0
         })
         .map_err(|error| {
@@ -221,19 +223,29 @@ fn collect_events(
         ring.poll(Duration::from_millis(100)).map_err(|error| {
             format!("failed to poll the resource tracking ring buffer: {error}")
         })?;
+        let mut lost = [0_u8; size_of::<u64>()];
+        skeleton
+            .maps
+            .eventStats
+            .lookup_into(&0_i32.to_ne_bytes(), &mut lost, MapFlags::ANY)
+            .map_err(|error| format!("failed to read resource tracking loss counter: {error}"))?;
+        if u64::from_ne_bytes(lost) > 0 {
+            incomplete.store(true, Ordering::Release);
+        }
     }
     Ok(())
 }
 
-fn handle_event(data: &[u8], allocations: &Allocations) {
+fn handle_event(data: &[u8], allocations: &Allocations, incomplete: &AtomicBool) {
     if data.len() < EVENT_HEADER_SIZE {
         return;
     }
     let address = read_u64(data, 0);
     let resource_type = read_u32(data, 16);
-    let mut current = allocations
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Ok(mut current) = allocations.lock() else {
+        incomplete.store(true, Ordering::Release);
+        return;
+    };
     match resource_type {
         RESTRACK_ALLOC => {
             let size = read_u64(data, 24);
@@ -244,7 +256,7 @@ fn handle_event(data: &[u8], allocations: &Allocations) {
                 .map(|index| read_u64(data, EVENT_HEADER_SIZE + index * size_of::<u64>()))
                 .take_while(|address| *address != 0)
                 .collect();
-            current.insert(address, Allocation { size, stack });
+            current.insert(address, Arc::new(Allocation { size, stack }));
         }
         RESTRACK_FREE => {
             current.remove(&address);
@@ -264,14 +276,13 @@ fn spawn_manual_trigger(
                 return Ok(());
             }
             println!("Press 't' to trigger a Restrack snapshot (or any other key to exit)...");
-            let mut input = [0_u8; 1];
-            let result = match std::io::stdin().read(&mut input) {
-                Ok(0) => Ok(()),
-                Ok(_) if input[0].eq_ignore_ascii_case(&b't') => {
+            let result = match wait_for_manual_input(&control) {
+                Ok(None) => Ok(()),
+                Ok(Some(input)) if input.eq_ignore_ascii_case(&b't') => {
                     println!("Triggering Restrack snapshot...");
-                    reporter.write(DumpKind::Manual).map(|_| ())
+                    reporter.write(DumpKind::Manual, None).map(|_| ())
                 }
-                Ok(_) => Ok(()),
+                Ok(Some(_)) => Ok(()),
                 Err(error) => Err(MonitorError::Restrack(format!(
                     "failed to read the resource tracking trigger: {error}"
                 ))),
@@ -282,22 +293,54 @@ fn spawn_manual_trigger(
         .map_err(MonitorError::Spawn)
 }
 
+fn wait_for_manual_input(control: &MonitorControl) -> std::io::Result<Option<u8>> {
+    let stdin = std::io::stdin();
+    let mut poll_fd = libc::pollfd {
+        fd: stdin.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    loop {
+        if control.is_quit_requested() {
+            return Ok(None);
+        }
+        let result = unsafe { libc::poll(&raw mut poll_fd, 1, 100) };
+        if result == -1 {
+            let error = std::io::Error::last_os_error();
+            if error.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error);
+        }
+        if result > 0 && poll_fd.revents & libc::POLLIN != 0 {
+            let mut input = [0_u8; 1];
+            return std::io::stdin()
+                .read(&mut input)
+                .map(|count| (count > 0).then_some(input[0]));
+        }
+    }
+}
+
 fn render_report(
     mut file: File,
     pid: i32,
     config: &RestrackConfig,
-    snapshot: HashMap<u64, Allocation>,
+    snapshot: HashMap<u64, Arc<Allocation>>,
+    incomplete: bool,
 ) -> Result<(), String> {
-    let mut grouped: HashMap<Allocation, u64> = HashMap::new();
+    let mut grouped: HashMap<Arc<Allocation>, u64> = HashMap::new();
     for allocation in snapshot.into_values() {
         *grouped.entry(allocation).or_default() += 1;
     }
     let mut grouped: Vec<_> = grouped.into_iter().collect();
-    grouped.sort_by_key(|(allocation, count)| std::cmp::Reverse(allocation.size * count));
+    grouped.sort_by_key(|(allocation, count)| {
+        std::cmp::Reverse(allocation.size.saturating_mul(*count))
+    });
 
     if grouped.is_empty() {
         file.write_all(b"No leaks detected.\n")
             .map_err(|error| format!("failed to write restrack report: {error}"))?;
+        write_incomplete_warning(&mut file, incomplete)?;
         return Ok(());
     }
 
@@ -341,7 +384,34 @@ fn render_report(
         )
         .map_err(|error| format!("failed to write restrack report: {error}"))?;
     }
+    write_incomplete_warning(&mut file, incomplete)?;
     Ok(())
+}
+
+fn write_incomplete_warning(file: &mut File, incomplete: bool) -> Result<(), String> {
+    if incomplete {
+        writeln!(
+            file,
+            "\n[WARNING] Resource tracking events were dropped; this report is incomplete."
+        )
+        .map_err(|error| format!("failed to write restrack report: {error}"))?;
+    }
+    Ok(())
+}
+
+fn restrack_path(
+    request: &DumpRequest,
+    primary_path: Option<&std::path::Path>,
+) -> Result<std::path::PathBuf, MonitorError> {
+    primary_path.map_or_else(
+        || sidecar_path(request, "restrack").map_err(MonitorError::from),
+        |path| {
+            Ok(std::path::PathBuf::from(format!(
+                "{}.restrack",
+                path.display()
+            )))
+        },
+    )
 }
 
 struct StackFrame {
@@ -428,20 +498,21 @@ mod tests {
     #[test]
     fn allocation_and_free_events_update_the_map() {
         let allocations = Arc::new(Mutex::new(HashMap::new()));
+        let incomplete = AtomicBool::new(false);
         let mut event = vec![0_u8; EVENT_HEADER_SIZE + size_of::<u64>()];
         event[0..8].copy_from_slice(&42_u64.to_ne_bytes());
         event[16..20].copy_from_slice(&RESTRACK_ALLOC.to_ne_bytes());
         event[24..32].copy_from_slice(&64_u64.to_ne_bytes());
         event[32..40].copy_from_slice(&1_i64.to_ne_bytes());
         event[40..48].copy_from_slice(&99_u64.to_ne_bytes());
-        handle_event(&event, &allocations);
+        handle_event(&event, &allocations, &incomplete);
 
         let allocation = allocations.lock().unwrap().get(&42).cloned().unwrap();
         assert_eq!(allocation.size, 64);
         assert_eq!(allocation.stack, vec![99]);
 
         event[16..20].copy_from_slice(&RESTRACK_FREE.to_ne_bytes());
-        handle_event(&event, &allocations);
+        handle_event(&event, &allocations, &incomplete);
         assert!(allocations.lock().unwrap().is_empty());
     }
 
@@ -463,5 +534,58 @@ mod tests {
 
         assert!(frames[0].symbolized);
         assert!(frames[0].text.contains("malloc"));
+    }
+
+    #[test]
+    fn manual_input_returns_when_monitor_is_cancelled() {
+        let control = MonitorControl::new();
+        control.request_quit();
+
+        assert_eq!(wait_for_manual_input(&control).unwrap(), None);
+    }
+
+    #[test]
+    fn sidecar_uses_exact_primary_dump_path() {
+        let request = DumpRequest {
+            pid: crate::process::ProcessId::new(42).unwrap(),
+            process_name: "worker".into(),
+            kind: DumpKind::Manual,
+            output: crate::config::OutputSpec::default(),
+            overwrite: false,
+            use_gcore: false,
+            platform: Platform::Linux,
+            cancellation: None,
+            core_dump_mask: None,
+        };
+
+        assert_eq!(
+            restrack_path(&request, Some(std::path::Path::new("/tmp/dump.42"))).unwrap(),
+            std::path::PathBuf::from("/tmp/dump.42.restrack")
+        );
+    }
+
+    #[test]
+    fn incomplete_empty_report_is_marked() {
+        let path =
+            std::env::temp_dir().join(format!("procdump-incomplete-report-{}", std::process::id()));
+        let file = File::create(&path).unwrap();
+        let config = RestrackConfig {
+            generate_dump: false,
+            sample_rate: 1,
+            exclude_filter: None,
+        };
+
+        render_report(
+            file,
+            std::process::id() as i32,
+            &config,
+            HashMap::new(),
+            true,
+        )
+        .unwrap();
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("report is incomplete"));
+        std::fs::remove_file(path).unwrap();
     }
 }

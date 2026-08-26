@@ -8,6 +8,7 @@ use std::io;
 use std::ptr;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 pub(crate) fn spawn_signal_monitor(
     control: Arc<MonitorControl>,
@@ -38,8 +39,15 @@ fn monitor_signals(
     while !control.is_quit_requested() {
         let mut status = 0;
         let waited = loop {
-            let result = unsafe { libc::waitpid(pid, &raw mut status, 0) };
+            if control.is_quit_requested() {
+                return Ok(());
+            }
+            let result = unsafe { libc::waitpid(pid, &raw mut status, libc::WNOHANG) };
             if result == -1 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            if result == 0 {
+                thread::sleep(Duration::from_millis(25));
                 continue;
             }
             break result;
@@ -62,14 +70,23 @@ fn monitor_signals(
         let signal = libc::WSTOPSIG(status);
         if signals.contains(&signal) {
             attachment.detach(libc::SIGSTOP)?;
-            println!("Trigger: Signal:{signal} on process ID: {pid}");
+            crate::diagnostics::info(
+                coordinator.diagnostics,
+                format!("Trigger: Signal:{signal} on process ID: {pid}"),
+            );
             let dump_result = coordinator
                 .write(DumpKind::Signal)
                 .map_err(|error| SignalError::Dump(error.to_string()));
-            let _ = send_signal(pid, libc::SIGCONT);
-            let _ = send_signal(pid, signal);
+            let resume_result = send_signal(pid, libc::SIGCONT);
+            let delivery_result = send_signal(pid, signal);
             dump_result?;
-            return Ok(());
+            resume_result?;
+            delivery_result?;
+            if coordinator.limit_reached() || control.is_quit_requested() {
+                return Ok(());
+            }
+            attachment = PtraceAttachment::seize(pid)?;
+            continue;
         }
 
         ptrace_continue(pid, signal)?;
@@ -127,7 +144,7 @@ impl PtraceAttachment {
 impl Drop for PtraceAttachment {
     fn drop(&mut self) {
         if self.attached {
-            let _ = unsafe {
+            let result = unsafe {
                 libc::ptrace(
                     libc::PTRACE_DETACH,
                     self.pid,
@@ -135,6 +152,15 @@ impl Drop for PtraceAttachment {
                     ptr::null_mut::<libc::c_void>(),
                 )
             };
+            if result == -1 {
+                eprintln!(
+                    "warning: failed to detach process {} during cleanup: {}",
+                    self.pid,
+                    io::Error::last_os_error()
+                );
+            } else {
+                self.attached = false;
+            }
         }
     }
 }

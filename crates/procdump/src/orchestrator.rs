@@ -4,15 +4,11 @@ use crate::monitor::{MonitorError, MonitorSet};
 use crate::process::{
     ProcessDiscovery, ProcessError, ProcessId, ProcessIdentity, ProcessMetrics, ProcessSnapshot,
 };
-use signal_hook::consts::{SIGINT, SIGTERM};
-use signal_hook::iterator::{Handle as SignalHandle, Signals};
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::io;
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, RecvTimeoutError, sync_channel};
-use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 pub fn monitor_processes<P>(
@@ -20,13 +16,13 @@ pub fn monitor_processes<P>(
     platform: Platform,
     processes: Arc<P>,
     backend: Arc<dyn DumpBackend>,
+    shutdown: Arc<crate::sync::MonitorControl>,
 ) -> Result<(), OrchestratorError>
 where
     P: ProcessDiscovery + ProcessMetrics + 'static,
 {
-    let (_signal_thread, shutdown) = SignalThread::start()?;
     let polling = Duration::from_millis(config.polling_interval_ms.max(50));
-    let mode = MonitorMode::from_config(config);
+    let mode = MonitorMode::from_config(config)?;
     let mut active = HashMap::new();
     let mut monitored = HashMap::new();
 
@@ -37,14 +33,20 @@ where
                 .ok_or_else(|| ProcessError::NameNotFound(name.clone()))?,
         ],
         MonitorMode::WaitForName(name) => {
-            println!(
-                "Waiting for processes '{}' to launch",
-                name.to_string_lossy()
+            crate::diagnostics::info(
+                config.diagnostics,
+                format!(
+                    "Waiting for processes '{}' to launch",
+                    name.to_string_lossy()
+                ),
             );
             discover_named_processes(processes.as_ref(), name, true)?
         }
         MonitorMode::ProcessGroup(group) => {
-            println!("Monitoring processes of PGID '{group}'");
+            crate::diagnostics::info(
+                config.diagnostics,
+                format!("Monitoring processes of PGID '{group}'"),
+            );
             let matches = discover_group_processes(processes.as_ref(), *group)?;
             if matches.is_empty() {
                 return Err(ProcessError::GroupNotFound(*group).into());
@@ -63,7 +65,7 @@ where
     )?;
 
     loop {
-        if shutdown.try_recv().is_ok() {
+        if shutdown.is_quit_requested() {
             break;
         }
         reap_finished(processes.as_ref(), &mut active)?;
@@ -92,9 +94,8 @@ where
         if matches!(mode, MonitorMode::ProcessGroup(_)) && active.is_empty() {
             break;
         }
-        match shutdown.recv_timeout(polling) {
-            Ok(()) | Err(RecvTimeoutError::Disconnected) => break,
-            Err(RecvTimeoutError::Timeout) => {}
+        if shutdown.wait(polling) == crate::sync::WaitOutcome::Quit {
+            break;
         }
     }
 
@@ -113,12 +114,14 @@ enum MonitorMode {
 }
 
 impl MonitorMode {
-    fn from_config(config: &Config) -> Self {
+    fn from_config(config: &Config) -> Result<Self, ProcessError> {
         match &config.target {
-            TargetSpec::Pid(pid) => Self::Pid(ProcessId::new(*pid).expect("validated PID")),
-            TargetSpec::Name(name) if config.wait_for_process => Self::WaitForName(name.clone()),
-            TargetSpec::Name(name) => Self::SingleName(name.clone()),
-            TargetSpec::ProcessGroup(group) => Self::ProcessGroup(*group),
+            TargetSpec::Pid(pid) => Ok(Self::Pid(ProcessId::new(*pid)?)),
+            TargetSpec::Name(name) if config.wait_for_process => {
+                Ok(Self::WaitForName(name.clone()))
+            }
+            TargetSpec::Name(name) => Ok(Self::SingleName(name.clone())),
+            TargetSpec::ProcessGroup(group) => Ok(Self::ProcessGroup(*group)),
         }
     }
 }
@@ -152,10 +155,13 @@ where
         if let Some(previous) = active.remove(&identity.pid) {
             finish_session(processes.as_ref(), previous)?;
         }
-        println!(
-            "Starting monitor for process {} ({})",
-            snapshot.name.to_string_lossy(),
-            identity.pid.get()
+        crate::diagnostics::info(
+            config.diagnostics,
+            format!(
+                "Starting monitor for process {} ({})",
+                snapshot.name.to_string_lossy(),
+                identity.pid.get()
+            ),
         );
         let metrics: Arc<dyn ProcessMetrics> = processes.clone();
         let monitor = MonitorSet::start(config, platform, snapshot, metrics, Arc::clone(backend))?;
@@ -172,13 +178,17 @@ fn reap_finished<P>(
 where
     P: ProcessDiscovery,
 {
-    let completed: Vec<_> = active
-        .iter()
-        .filter_map(|(pid, session)| {
-            let alive = processes.is_alive(session.identity).unwrap_or(false);
-            (session.monitor.has_finished() || !alive).then_some(*pid)
-        })
-        .collect();
+    let mut completed = Vec::new();
+    for (pid, session) in active.iter() {
+        let alive = match processes.is_alive(session.identity) {
+            Ok(alive) => alive,
+            Err(ProcessError::Disappeared(_)) => false,
+            Err(error) => return Err(error.into()),
+        };
+        if session.monitor.has_finished() || !alive {
+            completed.push(*pid);
+        }
+    }
     for pid in completed {
         if let Some(session) = active.remove(&pid) {
             finish_session(processes, session)?;
@@ -191,7 +201,11 @@ fn finish_session<P>(processes: &P, session: ActiveMonitor) -> Result<(), Orches
 where
     P: ProcessDiscovery,
 {
-    let alive = processes.is_alive(session.identity).unwrap_or(false);
+    let alive = match processes.is_alive(session.identity) {
+        Ok(alive) => alive,
+        Err(ProcessError::Disappeared(_)) => false,
+        Err(error) => return Err(error.into()),
+    };
     session.monitor.request_quit();
     match session.monitor.wait() {
         Ok(()) => Ok(()),
@@ -283,49 +297,10 @@ fn is_transient_discovery_error(error: &ProcessError) -> bool {
     }
 }
 
-struct SignalThread {
-    handle: SignalHandle,
-    thread: Option<JoinHandle<()>>,
-}
-
-impl SignalThread {
-    fn start() -> Result<(Self, Receiver<()>), OrchestratorError> {
-        let mut signals = Signals::new([SIGINT, SIGTERM]).map_err(OrchestratorError::Signal)?;
-        let handle = signals.handle();
-        let (shutdown, receiver) = sync_channel(1);
-        let thread = thread::Builder::new()
-            .name("shutdown signal monitor".into())
-            .spawn(move || {
-                if signals.forever().next().is_some() {
-                    let _ = shutdown.send(());
-                }
-            })
-            .map_err(OrchestratorError::SignalThread)?;
-        Ok((
-            Self {
-                handle,
-                thread: Some(thread),
-            },
-            receiver,
-        ))
-    }
-}
-
-impl Drop for SignalThread {
-    fn drop(&mut self) {
-        self.handle.close();
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum OrchestratorError {
     Process(ProcessError),
     Monitor(MonitorError),
-    Signal(io::Error),
-    SignalThread(io::Error),
 }
 
 impl fmt::Display for OrchestratorError {
@@ -333,13 +308,6 @@ impl fmt::Display for OrchestratorError {
         match self {
             Self::Process(error) => error.fmt(formatter),
             Self::Monitor(error) => error.fmt(formatter),
-            Self::Signal(error) => write!(formatter, "failed to install shutdown signals: {error}"),
-            Self::SignalThread(error) => {
-                write!(
-                    formatter,
-                    "failed to create shutdown signal thread: {error}"
-                )
-            }
         }
     }
 }
@@ -349,7 +317,6 @@ impl std::error::Error for OrchestratorError {
         match self {
             Self::Process(error) => Some(error),
             Self::Monitor(error) => Some(error),
-            Self::Signal(error) | Self::SignalThread(error) => Some(error),
         }
     }
 }
@@ -530,7 +497,14 @@ mod tests {
             core_dump_mask: None,
         };
 
-        monitor_processes(&config, Platform::Linux, processes, backend.clone()).unwrap();
+        monitor_processes(
+            &config,
+            Platform::Linux,
+            processes,
+            backend.clone(),
+            Arc::new(crate::sync::MonitorControl::new()),
+        )
+        .unwrap();
         let mut dumped = backend.0.lock().unwrap().clone();
         dumped.sort_unstable();
         assert_eq!(dumped, vec![10, 11]);

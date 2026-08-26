@@ -1,25 +1,36 @@
 use super::{CorexError, Mapping, ProcessInfo};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::Write;
-use std::os::unix::fs::{FileExt, OpenOptionsExt};
+use std::os::unix::fs::FileExt;
 use std::path::Path;
 
 const ELF_HEADER_SIZE: u64 = 64;
 const PROGRAM_HEADER_SIZE: u64 = 56;
-const PAGE_SIZE: u64 = 4096;
 const MEMORY_CHUNK_SIZE: usize = 1024 * 1024;
 const PT_LOAD: u32 = 1;
 const PT_NOTE: u32 = 4;
 
-pub(super) fn write(path: &Path, process: &ProcessInfo, notes: &[u8]) -> Result<(), CorexError> {
-    let result = write_inner(path, process, notes);
+pub(super) fn write(
+    path: &Path,
+    output: File,
+    process: &ProcessInfo,
+    notes: &[u8],
+    cancellation: Option<&crate::engine::CancellationToken>,
+) -> Result<(), CorexError> {
+    let result = write_inner(path, output, process, notes, cancellation);
     if result.is_err() {
         let _ = fs::remove_file(path);
     }
     result
 }
 
-fn write_inner(path: &Path, process: &ProcessInfo, notes: &[u8]) -> Result<(), CorexError> {
+fn write_inner(
+    path: &Path,
+    mut output: File,
+    process: &ProcessInfo,
+    notes: &[u8],
+    cancellation: Option<&crate::engine::CancellationToken>,
+) -> Result<(), CorexError> {
     let dumped: Vec<_> = process
         .mappings
         .iter()
@@ -38,6 +49,7 @@ fn write_inner(path: &Path, process: &ProcessInfo, notes: &[u8]) -> Result<(), C
         note_offset
             .checked_add(notes.len() as u64)
             .ok_or_else(|| CorexError::InvalidData("ELF note size overflow".into()))?,
+        process.page_size,
     )?;
     let mut next_offset = first_load_offset;
     let mut load_offsets = Vec::with_capacity(dumped.len());
@@ -50,13 +62,6 @@ fn write_inner(path: &Path, process: &ProcessInfo, notes: &[u8]) -> Result<(), C
     }
 
     let display_path = path.display().to_string();
-    let mut output = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)
-        .map_err(|source| CorexError::io("create", &display_path, source))?;
     output
         .write_all(&elf_header(program_header_count))
         .map_err(|source| CorexError::io("write", &display_path, source))?;
@@ -81,7 +86,7 @@ fn write_inner(path: &Path, process: &ProcessInfo, notes: &[u8]) -> Result<(), C
                 mapping.start,
                 size,
                 size,
-                PAGE_SIZE,
+                process.page_size,
             ))
             .map_err(|source| CorexError::io("write", &display_path, source))?;
     }
@@ -99,7 +104,8 @@ fn write_inner(path: &Path, process: &ProcessInfo, notes: &[u8]) -> Result<(), C
     let memory =
         File::open(&memory_path).map_err(|source| CorexError::io("open", &memory_path, source))?;
     for mapping in dumped {
-        write_mapping(&mut output, &memory, mapping, &display_path)?;
+        check_cancelled(cancellation)?;
+        write_mapping(&mut output, &memory, mapping, &display_path, cancellation)?;
     }
     output
         .flush()
@@ -147,18 +153,31 @@ fn write_mapping(
     memory: &File,
     mapping: &Mapping,
     output_path: &str,
+    cancellation: Option<&crate::engine::CancellationToken>,
 ) -> Result<(), CorexError> {
     let mut buffer = vec![0_u8; MEMORY_CHUNK_SIZE];
     let mut address = mapping.start;
     let mut remaining = mapping_size(mapping)?;
     while remaining > 0 {
+        check_cancelled(cancellation)?;
         let requested = usize::try_from(remaining.min(MEMORY_CHUNK_SIZE as u64)).unwrap();
         let read = match memory.read_at(&mut buffer[..requested], address) {
-            Ok(0) | Err(_) => {
+            Ok(0) => {
                 buffer[..requested].fill(0);
                 requested
             }
             Ok(read) => read,
+            Err(error) if matches!(error.raw_os_error(), Some(libc::EIO | libc::EFAULT)) => {
+                buffer[..requested].fill(0);
+                requested
+            }
+            Err(error) => {
+                return Err(CorexError::io(
+                    "read process memory for",
+                    format!("{:#x}-{:#x}", mapping.start, mapping.end),
+                    error,
+                ));
+            }
         };
         output
             .write_all(&buffer[..read])
@@ -169,8 +188,18 @@ fn write_mapping(
     Ok(())
 }
 
+fn check_cancelled(
+    cancellation: Option<&crate::engine::CancellationToken>,
+) -> Result<(), CorexError> {
+    if cancellation.is_some_and(crate::engine::CancellationToken::is_cancelled) {
+        Err(CorexError::Cancelled)
+    } else {
+        Ok(())
+    }
+}
+
 fn write_zeroes(output: &mut File, mut size: usize, path: &str) -> Result<(), CorexError> {
-    let zeroes = [0_u8; PAGE_SIZE as usize];
+    let zeroes = [0_u8; 4096];
     while size > 0 {
         let count = size.min(zeroes.len());
         output
@@ -190,10 +219,13 @@ fn mapping_size(mapping: &Mapping) -> Result<u64, CorexError> {
     })
 }
 
-fn align_page(value: u64) -> Result<u64, CorexError> {
+fn align_page(value: u64, page_size: u64) -> Result<u64, CorexError> {
+    if page_size == 0 {
+        return Err(CorexError::InvalidData("page size is zero".into()));
+    }
     value
-        .checked_add(PAGE_SIZE - 1)
-        .map(|value| value & !(PAGE_SIZE - 1))
+        .checked_add(page_size - 1)
+        .map(|value| value / page_size * page_size)
         .ok_or_else(|| CorexError::InvalidData("ELF alignment overflow".into()))
 }
 
@@ -233,7 +265,7 @@ mod tests {
 
     #[test]
     fn page_alignment_rounds_up() {
-        assert_eq!(align_page(4096).unwrap(), 4096);
-        assert_eq!(align_page(4097).unwrap(), 8192);
+        assert_eq!(align_page(16_384, 16_384).unwrap(), 16_384);
+        assert_eq!(align_page(16_385, 16_384).unwrap(), 32_768);
     }
 }

@@ -1,6 +1,9 @@
 #![allow(unsafe_code)]
 
-#[cfg(target_os = "linux")]
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
 mod corex;
 #[cfg(target_os = "linux")]
 mod dotnet;
@@ -10,6 +13,8 @@ mod process_name;
 
 #[cfg(feature = "monitor")]
 pub mod config;
+#[cfg(feature = "monitor")]
+pub mod diagnostics;
 #[cfg(feature = "monitor")]
 pub mod dump;
 #[cfg(all(target_os = "linux", feature = "dotnet-triggers"))]
@@ -82,7 +87,6 @@ pub fn write_dump(
     }
 
     let process_name = process_name::name(process_id).map_err(WriteDumpError::Process)?;
-    let _mask = mask::CoreDumpMaskGuard::apply(process_id, options.core_dump_mask)?;
     engine::write_dump(&engine::DumpRequest {
         pid: process_id,
         process_name,
@@ -94,11 +98,14 @@ pub fn write_dump(
         overwrite: options.overwrite,
         use_gcore: options.use_gcore,
         platform: engine::Platform::native()?,
+        cancellation: None,
+        core_dump_mask: options.core_dump_mask,
     })
-    .map_err(WriteDumpError::Dump)
+    .map_err(|error| WriteDumpError::Dump(error.to_string()))
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum WriteDumpError {
     InvalidArgument,
     InvalidDirectory(PathBuf),
@@ -106,12 +113,40 @@ pub enum WriteDumpError {
     UnsupportedCoreDumpMask,
     UnsupportedPlatform,
     Process(String),
-    Dump(engine::DumpError),
+    Dump(String),
     Io {
         operation: &'static str,
         path: PathBuf,
         source: std::io::Error,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum WriteDumpErrorKind {
+    InvalidArgument,
+    InvalidDirectory,
+    InvalidCoreDumpMask,
+    Unsupported,
+    Process,
+    Dump,
+    Io,
+}
+
+impl WriteDumpError {
+    pub const fn kind(&self) -> WriteDumpErrorKind {
+        match self {
+            Self::InvalidArgument => WriteDumpErrorKind::InvalidArgument,
+            Self::InvalidDirectory(_) => WriteDumpErrorKind::InvalidDirectory,
+            Self::InvalidCoreDumpMask => WriteDumpErrorKind::InvalidCoreDumpMask,
+            Self::UnsupportedCoreDumpMask | Self::UnsupportedPlatform => {
+                WriteDumpErrorKind::Unsupported
+            }
+            Self::Process(_) => WriteDumpErrorKind::Process,
+            Self::Dump(_) => WriteDumpErrorKind::Dump,
+            Self::Io { .. } => WriteDumpErrorKind::Io,
+        }
+    }
 }
 
 impl fmt::Display for WriteDumpError {
@@ -130,7 +165,7 @@ impl fmt::Display for WriteDumpError {
             }
             Self::UnsupportedPlatform => formatter.write_str("this platform is not supported"),
             Self::Process(message) => formatter.write_str(message),
-            Self::Dump(error) => error.fmt(formatter),
+            Self::Dump(error) => formatter.write_str(error),
             Self::Io {
                 operation,
                 path,
@@ -147,19 +182,8 @@ impl fmt::Display for WriteDumpError {
 impl std::error::Error for WriteDumpError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Dump(error) => Some(error),
             Self::Io { source, .. } => Some(source),
             _ => None,
         }
     }
-}
-
-#[doc(hidden)]
-pub mod internal {
-    #[cfg(target_os = "linux")]
-    pub use crate::dotnet::find_diagnostics_socket;
-    pub use crate::engine::{
-        DumpBackend, DumpError, DumpKind, DumpRequest, GcoreBackend, OutputSpec, Platform,
-        PlatformDumpBackend, sidecar_path,
-    };
 }

@@ -14,14 +14,13 @@ path = "src/lib.rs"
 
 [features]
 default = []
-monitor = ["dep:signal-hook"]
+monitor = []
 dotnet-triggers = ["monitor"]
 restrack = ["monitor", "dep:blazesym", "dep:libbpf-cargo", "dep:libbpf-rs"]
 full = ["dotnet-triggers", "restrack"]
 
 [dependencies]
 libc.workspace = true
-signal-hook = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 blazesym = { version = "=0.2.3", optional = true }

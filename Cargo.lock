@@ -541,7 +541,6 @@ dependencies = [
  "libbpf-cargo",
  "libbpf-rs",
  "libc",
- "signal-hook",
 ]
 
 [[package]]
@@ -557,6 +556,7 @@ name = "procdump-cli"
 version = "0.1.0"
 dependencies = [
  "procdump",
+ "signal-hook",
 ]
 
 [[package]]

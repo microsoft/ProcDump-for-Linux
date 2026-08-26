@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -17,7 +18,29 @@ pub fn find_diagnostics_socket(pid: i32) -> Result<Option<PathBuf>, DotNetError>
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/tmp"));
     let prefix = temporary.join(format!("dotnet-diagnostic-{pid}-"));
-    Ok(find_socket_in_table(&socket_table, &prefix))
+    let inodes = process_socket_inodes(pid)?;
+    Ok(find_socket_in_table(&socket_table, &prefix, &inodes))
+}
+
+fn process_socket_inodes(pid: i32) -> Result<HashSet<u64>, DotNetError> {
+    let directory = format!("/proc/{pid}/fd");
+    let entries = fs::read_dir(&directory).map_err(DotNetError::Descriptors)?;
+    let mut inodes = HashSet::new();
+    for entry in entries {
+        let Ok(entry) = entry else { continue };
+        let Ok(target) = fs::read_link(entry.path()) else {
+            continue;
+        };
+        let target = target.to_string_lossy();
+        if let Some(inode) = target
+            .strip_prefix("socket:[")
+            .and_then(|value| value.strip_suffix(']'))
+            .and_then(|value| value.parse().ok())
+        {
+            inodes.insert(inode);
+        }
+    }
+    Ok(inodes)
 }
 
 pub(crate) fn generate_dump(socket: &Path, output: &Path) -> Result<(), DotNetError> {
@@ -56,13 +79,22 @@ pub(crate) fn generate_dump(socket: &Path, output: &Path) -> Result<(), DotNetEr
     Ok(())
 }
 
-fn find_socket_in_table(table: &str, prefix: &Path) -> Option<PathBuf> {
+fn find_socket_in_table(
+    table: &str,
+    prefix: &Path,
+    target_inodes: &HashSet<u64>,
+) -> Option<PathBuf> {
     let prefix = prefix.to_string_lossy();
     table
         .lines()
-        .filter_map(|line| line.split_whitespace().last())
-        .find(|candidate| candidate.starts_with(prefix.as_ref()))
-        .map(PathBuf::from)
+        .filter_map(|line| {
+            let fields: Vec<_> = line.split_whitespace().collect();
+            let inode = fields.get(6)?.parse::<u64>().ok()?;
+            let path = *fields.get(7)?;
+            (target_inodes.contains(&inode) && path.starts_with(prefix.as_ref()))
+                .then(|| PathBuf::from(path))
+        })
+        .next()
 }
 
 fn build_dump_packet(output: &Path) -> Result<Vec<u8>, DotNetError> {
@@ -97,6 +129,7 @@ fn build_dump_packet(output: &Path) -> Result<Vec<u8>, DotNetError> {
 #[derive(Debug)]
 pub enum DotNetError {
     SocketTable(io::Error),
+    Descriptors(io::Error),
     Connect { socket: PathBuf, source: io::Error },
     Configure(io::Error),
     Send(io::Error),
@@ -110,6 +143,12 @@ impl std::fmt::Display for DotNetError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::SocketTable(error) => write!(formatter, "failed to read /proc/net/unix: {error}"),
+            Self::Descriptors(error) => {
+                write!(
+                    formatter,
+                    "failed to inspect target socket descriptors: {error}"
+                )
+            }
             Self::Connect { socket, source } => write!(
                 formatter,
                 "failed to connect to .NET diagnostics socket {}: {source}",
@@ -146,7 +185,11 @@ mod tests {
                      0: 1 2 3 4 5 6 /tmp/dotnet-diagnostic-1168-1-socket\n\
                      1: 1 2 3 4 5 6 /tmp/dotnet-diagnostic-1-9-socket\n";
         assert_eq!(
-            find_socket_in_table(table, Path::new("/tmp/dotnet-diagnostic-1-")),
+            find_socket_in_table(
+                table,
+                Path::new("/tmp/dotnet-diagnostic-1-"),
+                &HashSet::from([6]),
+            ),
             Some(PathBuf::from("/tmp/dotnet-diagnostic-1-9-socket"))
         );
     }

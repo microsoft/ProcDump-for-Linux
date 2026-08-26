@@ -56,6 +56,9 @@ pub(crate) fn name(pid: i32) -> Result<OsString, String> {
             std::io::Error::last_os_error()
         ));
     }
+    if bytes as usize > path.len() {
+        return Err("proc_pidpath returned an oversized path".into());
+    }
     path.truncate(bytes as usize);
     let path = OsStr::from_bytes(&path);
     Ok(Path::new(path)

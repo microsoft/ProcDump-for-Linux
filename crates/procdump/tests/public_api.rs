@@ -1,4 +1,4 @@
-use procdump::{WriteDumpError, WriteDumpOptions, write_dump};
+use procdump::{WriteDumpError, WriteDumpErrorKind, WriteDumpOptions, write_dump};
 use std::path::Path;
 
 #[test]
@@ -6,6 +6,7 @@ fn invalid_pid_returns_typed_error_with_compatible_text() {
     let error = write_dump(0, "/tmp/core", WriteDumpOptions::default()).unwrap_err();
 
     assert!(matches!(error, WriteDumpError::InvalidArgument));
+    assert_eq!(error.kind(), WriteDumpErrorKind::InvalidArgument);
     assert_eq!(
         error.to_string(),
         "Invalid argument: a valid processId and dumpPath are required."

@@ -5,8 +5,10 @@
 #include "corhlpr.h"
 #include "CComPtr.h"
 #include "profiler_pal.h"
+#include <fcntl.h>
 #include <string>
 #include <stdio.h>
+#include <sys/stat.h>
 
 INITIALIZE_EASYLOGGINGPP
 
@@ -210,8 +212,7 @@ CorProfiler::CorProfiler() :
     procDumpPid(0), currentThresholdIndex(0), gcGeneration(-1), gcGenStarted(false)
 {
     // Configure logging
-    el::Loggers::reconfigureAllLoggers(el::ConfigurationType::Filename, LOG_FILE);
-    el::Loggers::reconfigureAllLoggers(el::ConfigurationType::MaxLogFileSize, MAX_LOG_FILE_SIZE);
+    el::Loggers::reconfigureAllLoggers(el::ConfigurationType::ToFile, "false");
     el::Loggers::reconfigureAllLoggers(el::ConfigurationType::ToStandardOutput, "false");
     el::Loggers::reconfigureAllLoggers(el::ConfigurationType::Format, "%datetime %level [%thread] [%func] [%loc] %msg");
 
@@ -820,10 +821,26 @@ bool CorProfiler::WriteDumpHelper(std::string dumpName)
     if(IsCoreClrProcess(getpid(), &socketName))
     {
         LOG(TRACE) << "CorProfiler::WriteDumpHelper: Target is .NET process";
+        int dumpFile = open(dumpName.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+                            S_IRUSR | S_IWUSR);
+        if(dumpFile == -1)
+        {
+            LOG(TRACE) << "CorProfiler::WriteDumpHelper: Failed to reserve dump path: " << errno;
+            delete[] socketName;
+            return false;
+        }
+        if(close(dumpFile) == -1)
+        {
+            LOG(TRACE) << "CorProfiler::WriteDumpHelper: Failed to close reserved dump path: " << errno;
+            unlink(dumpName.c_str());
+            delete[] socketName;
+            return false;
+        }
         bool res = GenerateCoreClrDump(socketName, const_cast<char*> (dumpName.c_str()));
         if(res == false)
         {
             LOG(TRACE) << "CorProfiler::WriteDumpHelper: Failed to generate core dump";
+            unlink(dumpName.c_str());
             delete[] socketName;
             return false;
         }

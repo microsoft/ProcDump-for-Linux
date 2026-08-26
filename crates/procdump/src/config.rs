@@ -119,26 +119,257 @@ pub struct RestrackConfig {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Config {
-    pub target: TargetSpec,
-    pub output: OutputSpec,
-    pub cpu: Option<Threshold<u32>>,
-    pub memory_mb: Option<Threshold<Vec<u64>>>,
-    pub thread_count: Option<u32>,
-    pub file_descriptor_count: Option<u32>,
-    pub polling_interval_ms: u64,
-    pub threshold_seconds: u64,
-    pub dump_count: u32,
-    pub wait_for_process: bool,
-    pub overwrite: bool,
-    pub diagnostics: DiagnosticsTarget,
-    pub use_gcore: bool,
-    pub timer_trigger: bool,
-    pub signals: Vec<i32>,
-    pub dotnet_trigger: Option<DotNetTrigger>,
-    pub exception_filter: Option<OsString>,
-    pub perf_counters: Vec<PerfCounterTrigger>,
-    pub restrack: Option<RestrackConfig>,
-    pub core_dump_mask: Option<u32>,
+    pub(crate) target: TargetSpec,
+    pub(crate) output: OutputSpec,
+    pub(crate) cpu: Option<Threshold<u32>>,
+    pub(crate) memory_mb: Option<Threshold<Vec<u64>>>,
+    pub(crate) thread_count: Option<u32>,
+    pub(crate) file_descriptor_count: Option<u32>,
+    pub(crate) polling_interval_ms: u64,
+    pub(crate) threshold_seconds: u64,
+    pub(crate) dump_count: u32,
+    pub(crate) wait_for_process: bool,
+    pub(crate) overwrite: bool,
+    pub(crate) diagnostics: DiagnosticsTarget,
+    pub(crate) use_gcore: bool,
+    pub(crate) timer_trigger: bool,
+    pub(crate) signals: Vec<i32>,
+    pub(crate) dotnet_trigger: Option<DotNetTrigger>,
+    pub(crate) exception_filter: Option<OsString>,
+    pub(crate) perf_counters: Vec<PerfCounterTrigger>,
+    pub(crate) restrack: Option<RestrackConfig>,
+    pub(crate) core_dump_mask: Option<u32>,
+}
+
+impl Config {
+    pub fn builder(target: TargetSpec) -> ConfigBuilder {
+        ConfigBuilder {
+            config: Self {
+                target,
+                output: OutputSpec::default(),
+                cpu: None,
+                memory_mb: None,
+                thread_count: None,
+                file_descriptor_count: None,
+                polling_interval_ms: DEFAULT_POLLING_INTERVAL_MS,
+                threshold_seconds: DEFAULT_THRESHOLD_SECONDS,
+                dump_count: DEFAULT_DUMP_COUNT,
+                wait_for_process: false,
+                overwrite: false,
+                diagnostics: DiagnosticsTarget::None,
+                use_gcore: false,
+                timer_trigger: true,
+                signals: Vec::new(),
+                dotnet_trigger: None,
+                exception_filter: None,
+                perf_counters: Vec::new(),
+                restrack: None,
+                core_dump_mask: None,
+            },
+        }
+    }
+
+    pub fn target(&self) -> &TargetSpec {
+        &self.target
+    }
+
+    pub fn output(&self) -> &OutputSpec {
+        &self.output
+    }
+
+    pub fn diagnostics(&self) -> DiagnosticsTarget {
+        self.diagnostics
+    }
+
+    pub fn dump_count(&self) -> u32 {
+        self.dump_count
+    }
+
+    pub fn requires_gcore_preflight(&self) -> bool {
+        self.dotnet_trigger.is_none()
+            && self.perf_counters.is_empty()
+            && !self
+                .restrack
+                .as_ref()
+                .is_some_and(|restrack| !restrack.generate_dump)
+    }
+
+    fn validate(&self) -> Result<(), ParseError> {
+        match self.target {
+            TargetSpec::Pid(pid) if pid <= 0 => {
+                return Err(ParseError::InvalidCombination(
+                    "process ID must be greater than zero".into(),
+                ));
+            }
+            TargetSpec::ProcessGroup(group) if group <= 0 => {
+                return Err(ParseError::InvalidCombination(
+                    "process group must be greater than zero".into(),
+                ));
+            }
+            _ => {}
+        }
+        if self.dump_count == 0 || self.dump_count > MAX_DUMP_COUNT {
+            return Err(ParseError::InvalidCombination(format!(
+                "dump count must be between 1 and {MAX_DUMP_COUNT}"
+            )));
+        }
+        if self.polling_interval_ms == 0 {
+            return Err(ParseError::InvalidCombination(
+                "polling interval must be greater than zero".into(),
+            ));
+        }
+        if self.signals.iter().any(|signal| {
+            !(1..=64).contains(signal) || matches!(*signal, libc::SIGKILL | libc::SIGSTOP)
+        }) {
+            return Err(ParseError::InvalidCombination(
+                "signals must be catchable values between 1 and 64".into(),
+            ));
+        }
+        if self.restrack.as_ref().is_some_and(|restrack| {
+            restrack.sample_rate == 0 || restrack.sample_rate > i32::MAX as u32
+        }) {
+            return Err(ParseError::InvalidCombination(
+                "resource tracking sample rate is outside the eBPF range".into(),
+            ));
+        }
+        if self.wait_for_process && !matches!(self.target, TargetSpec::Name(_)) {
+            return Err(ParseError::InvalidCombination(
+                "the wait option requires a process name".into(),
+            ));
+        }
+        if self.perf_counters.len() > MAX_PERF_COUNTER_TRIGGERS {
+            return Err(ParseError::InvalidCombination(format!(
+                "at most {MAX_PERF_COUNTER_TRIGGERS} performance counter triggers are allowed"
+            )));
+        }
+        if (self.dotnet_trigger.is_some() || !self.perf_counters.is_empty())
+            && !cfg!(feature = "dotnet-triggers")
+        {
+            return Err(ParseError::InvalidCombination(
+                ".NET triggers require the dotnet-triggers Cargo feature".into(),
+            ));
+        }
+        if self.restrack.is_some() && !cfg!(feature = "restrack") {
+            return Err(ParseError::InvalidCombination(
+                "resource tracking requires the restrack Cargo feature".into(),
+            ));
+        }
+        if self.exception_filter.is_some() && self.dotnet_trigger != Some(DotNetTrigger::Exception)
+        {
+            return Err(ParseError::InvalidCombination(
+                "exception filters require the exception trigger".into(),
+            ));
+        }
+        let exclusive_trigger =
+            !self.signals.is_empty() || self.dotnet_trigger == Some(DotNetTrigger::Exception);
+        if exclusive_trigger
+            && (self.cpu.is_some()
+                || self.memory_mb.is_some()
+                || self.thread_count.is_some()
+                || self.file_descriptor_count.is_some()
+                || !self.perf_counters.is_empty())
+        {
+            return Err(ParseError::InvalidCombination(
+                "signal and exception triggers must be the only trigger specified".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+pub struct ConfigBuilder {
+    config: Config,
+}
+
+impl ConfigBuilder {
+    pub fn output(mut self, output: OutputSpec) -> Self {
+        self.config.output = output;
+        self
+    }
+    pub fn cpu(mut self, threshold: Threshold<u32>) -> Self {
+        self.config.cpu = Some(threshold);
+        self.config.timer_trigger = false;
+        self
+    }
+    pub fn memory(mut self, threshold: Threshold<Vec<u64>>) -> Self {
+        self.config.memory_mb = Some(threshold);
+        self.config.timer_trigger = false;
+        self
+    }
+    pub fn thread_count(mut self, threshold: u32) -> Self {
+        self.config.thread_count = Some(threshold);
+        self.config.timer_trigger = false;
+        self
+    }
+    pub fn file_descriptor_count(mut self, threshold: u32) -> Self {
+        self.config.file_descriptor_count = Some(threshold);
+        self.config.timer_trigger = false;
+        self
+    }
+    pub fn polling_interval_ms(mut self, interval: u64) -> Self {
+        self.config.polling_interval_ms = interval;
+        self
+    }
+    pub fn threshold_seconds(mut self, seconds: u64) -> Self {
+        self.config.threshold_seconds = seconds;
+        self
+    }
+    pub fn dump_count(mut self, count: u32) -> Self {
+        self.config.dump_count = count;
+        self
+    }
+    pub fn wait_for_process(mut self, wait: bool) -> Self {
+        self.config.wait_for_process = wait;
+        self
+    }
+    pub fn overwrite(mut self, overwrite: bool) -> Self {
+        self.config.overwrite = overwrite;
+        self
+    }
+    pub fn diagnostics(mut self, diagnostics: DiagnosticsTarget) -> Self {
+        self.config.diagnostics = diagnostics;
+        self
+    }
+    pub fn use_gcore(mut self, use_gcore: bool) -> Self {
+        self.config.use_gcore = use_gcore;
+        self
+    }
+    pub fn timer(mut self, enabled: bool) -> Self {
+        self.config.timer_trigger = enabled;
+        self
+    }
+    pub fn signals(mut self, signals: Vec<i32>) -> Self {
+        self.config.signals = signals;
+        self.config.timer_trigger = false;
+        self
+    }
+    pub fn dotnet_trigger(mut self, trigger: DotNetTrigger) -> Self {
+        self.config.dotnet_trigger = Some(trigger);
+        self.config.timer_trigger = false;
+        self
+    }
+    pub fn exception_filter(mut self, filter: impl Into<OsString>) -> Self {
+        self.config.exception_filter = Some(filter.into());
+        self
+    }
+    pub fn perf_counter(mut self, trigger: PerfCounterTrigger) -> Self {
+        self.config.perf_counters.push(trigger);
+        self.config.timer_trigger = false;
+        self
+    }
+    pub fn restrack(mut self, config: RestrackConfig) -> Self {
+        self.config.restrack = Some(config);
+        self
+    }
+    pub fn core_dump_mask(mut self, mask: u32) -> Self {
+        self.config.core_dump_mask = Some(mask);
+        self
+    }
+
+    pub fn build(self) -> Result<Config, ParseError> {
+        self.config.validate()?;
+        Ok(self.config)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -308,7 +539,14 @@ where
             Some("sr") => {
                 require_capability(capabilities.resource_tracking, "sr")?;
                 ensure_absent(&sample_rate, "sr")?;
-                sample_rate = Some(parse_next_number(&arguments, &mut index, "sr")?);
+                let value: u32 = parse_next_number(&arguments, &mut index, "sr")?;
+                if value > i32::MAX as u32 {
+                    return Err(ParseError::InvalidValue {
+                        option: "sr".into(),
+                        value: value.to_string().into(),
+                    });
+                }
+                sample_rate = Some(value.max(DEFAULT_SAMPLE_RATE));
             }
             Some("sig") => {
                 require_capability(capabilities.signal_triggers, "sig")?;
@@ -523,7 +761,7 @@ where
         exclude_filter,
     });
 
-    Ok(Config {
+    let config = Config {
         target,
         output: output.unwrap_or_default(),
         cpu,
@@ -548,7 +786,9 @@ where
         perf_counters,
         restrack,
         core_dump_mask,
-    })
+    };
+    config.validate()?;
+    Ok(config)
 }
 
 impl<T> Threshold<Vec<T>> {
@@ -972,11 +1212,57 @@ mod tests {
         assert!(!timed.restrack.unwrap().generate_dump);
     }
 
+    #[cfg(feature = "restrack")]
+    #[test]
+    fn restrack_sample_rate_matches_ebpf_range() {
+        let zero = parse_test(&["-restrack", "-sr", "0", "42"], Platform::Linux).unwrap();
+        assert_eq!(zero.restrack.unwrap().sample_rate, DEFAULT_SAMPLE_RATE);
+
+        let too_large = parse_test(&["-restrack", "-sr", "2147483648", "42"], Platform::Linux);
+        assert!(matches!(too_large, Err(ParseError::InvalidValue { .. })));
+    }
+
     #[test]
     fn macos_rejects_linux_advanced_options() {
         for option in ["-sig", "-gcm", "-restrack", "-mc", "-pc"] {
             let error = parse_test(&[option, "1", "42"], Platform::MacOs).unwrap_err();
             assert!(matches!(error, ParseError::UnsupportedOption(_)));
         }
+    }
+
+    #[test]
+    fn builder_rejects_invalid_safe_api_states() {
+        assert!(Config::builder(TargetSpec::Pid(0)).build().is_err());
+        assert!(
+            Config::builder(TargetSpec::Pid(42))
+                .dump_count(0)
+                .build()
+                .is_err()
+        );
+        assert!(
+            Config::builder(TargetSpec::Pid(42))
+                .polling_interval_ms(0)
+                .build()
+                .is_err()
+        );
+        assert!(
+            Config::builder(TargetSpec::Pid(42))
+                .signals(vec![libc::SIGKILL])
+                .build()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn builder_creates_cpu_monitor_configuration() {
+        let config = Config::builder(TargetSpec::Pid(42))
+            .cpu(Threshold::AtLeast(80))
+            .dump_count(2)
+            .build()
+            .unwrap();
+
+        assert_eq!(config.cpu, Some(Threshold::AtLeast(80)));
+        assert_eq!(config.dump_count(), 2);
+        assert!(!config.timer_trigger);
     }
 }

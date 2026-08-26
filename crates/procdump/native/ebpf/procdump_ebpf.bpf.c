@@ -20,7 +20,6 @@
 pid_t target_PID;
 uint dev, inode;
 int sampleRate;
-int currentSampleCount;
 bool isLoggingEnabled;
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
@@ -58,16 +57,55 @@ static inline bool GetFilterPidTgid(struct bpf_pidns_info* pidns)
 __attribute__((always_inline))
 static inline bool CheckSampleRate()
 {
-    if(currentSampleCount == sampleRate)
+    int key = 0;
+    int* currentSampleCount;
+    if(sampleRate <= 1)
     {
-        currentSampleCount = 1;
         return true;
     }
-    else
+    currentSampleCount = bpf_map_lookup_elem(&sampleCounts, &key);
+    if(currentSampleCount == NULL)
     {
-        currentSampleCount++;
         return false;
     }
+    (*currentSampleCount)++;
+    if(*currentSampleCount >= sampleRate)
+    {
+        *currentSampleCount = 0;
+        return true;
+    }
+    return false;
+}
+
+__attribute__((always_inline))
+static inline void DiscardEvent(struct bpf_pidns_info* pidns)
+{
+    bpf_map_delete_elem(&argsHashMap, &pidns->pid);
+}
+
+__attribute__((always_inline))
+static inline void RecordLostEvent()
+{
+    int key = 0;
+    __u64* lost = bpf_map_lookup_elem(&eventStats, &key);
+    if(lost != NULL)
+    {
+        __sync_fetch_and_add(lost, 1);
+    }
+}
+
+__attribute__((always_inline))
+static inline bool CheckedArraySize(unsigned long size, unsigned long count, unsigned long* total)
+{
+    unsigned long low = (size & 0xffffffffUL) * count;
+    unsigned long high = (size >> 32) * count;
+    if(high > 0xffffffffUL)
+    {
+        return false;
+    }
+    unsigned long shifted = high << 32;
+    *total = low + shifted;
+    return *total >= low;
 }
 
 // ------------------------------------------------------------------------------------------
@@ -101,11 +139,6 @@ static inline int SendEvent(void* alloc, bool freeOp, struct bpf_pidns_info* pid
     //
     // Only trace PIDs that matched the target PID and have non NULL allocations
     //
-    if (freeOp == false && alloc == NULL)
-    {
-        return 1;
-    }
-
     //
     // Get event
     //
@@ -114,6 +147,20 @@ static inline int SendEvent(void* alloc, bool freeOp, struct bpf_pidns_info* pid
     {
         BPF_PRINTK("   [SendEvent] Failed: Getting event (allocation address: 0x%lx, target PID: %d)", alloc, target_PID);
         return 1;
+    }
+
+    if (freeOp == false && alloc == NULL)
+    {
+        if(event->previousAddress != 0 && event->allocSize == 0)
+        {
+            event->resourceType = RESTRACK_FREE;
+            event->allocAddress = event->previousAddress;
+            event->previousAddress = 0;
+            event->callStackLen = 0;
+            bpf_ringbuf_output(&ringBuffer, event, sizeof(*event), 0);
+        }
+        DiscardEvent(pidns);
+        return 0;
     }
 
     //
@@ -133,7 +180,26 @@ static inline int SendEvent(void* alloc, bool freeOp, struct bpf_pidns_info* pid
     if((ret = bpf_ringbuf_output(&ringBuffer, event, sizeof(*event), 0)) != 0)
     {
         BPF_PRINTK("   [SendEvent] Failed: Getting event (type: %d, allocation address: 0x%lx, target PID: %d)", event->resourceType, event->allocAddress, target_PID);
+        RecordLostEvent();
+        DiscardEvent(pidns);
         return ret;
+    }
+
+
+    if(freeOp == false && event->previousAddress != 0 &&
+       event->previousAddress != (unsigned long)alloc)
+    {
+        unsigned long newAddress = event->allocAddress;
+        event->resourceType = RESTRACK_FREE;
+        event->allocAddress = event->previousAddress;
+        event->previousAddress = 0;
+        event->allocSize = 0;
+        event->callStackLen = 0;
+        if(bpf_ringbuf_output(&ringBuffer, event, sizeof(*event), 0) != 0)
+        {
+            RecordLostEvent();
+        }
+        event->allocAddress = newAddress;
     }
 
     {BPF_PRINTK("   [SendEvent] Deleting event for %ld", pidns->pid);}
@@ -156,7 +222,7 @@ __attribute__((always_inline))
 static inline int ResourceFreeHelper(void* alloc, struct bpf_pidns_info* pidns)
 {
     struct ResourceInformation* event = NULL;
-    uint32_t map_id = bpf_get_smp_processor_id();
+    uint32_t map_id = 0;
 
     //
     // Get heap element from the map
@@ -202,7 +268,7 @@ __attribute__((always_inline))
 static inline int ResourceAllocHelper(unsigned long size, struct pt_regs *ctx, struct bpf_pidns_info* pidns)
 {
     struct ResourceInformation* event = NULL;
-    uint32_t map_id = bpf_get_smp_processor_id();
+    uint32_t map_id = 0;
 
     //
     // Only trace if we should sample this event.
@@ -280,7 +346,15 @@ int sys_mmap_exit(struct pt_regs *ctx)
     }
 
     {BPF_PRINTK("[***** sys_mmap_exit, pid: %ld, tgid: %ld]", pidns.pid, pidns.tgid);}
-    SendEvent((void*) PT_REGS_RC(ctx), false, &pidns);
+    long result = (long)PT_REGS_RC(ctx);
+    if(result == -1)
+    {
+        DiscardEvent(&pidns);
+    }
+    else
+    {
+        SendEvent((void*)result, false, &pidns);
+    }
     return 0;
 }
 
@@ -314,7 +388,14 @@ int sys_munmap_exit(struct pt_regs *ctx)
     }
 
     {BPF_PRINTK("[***** sys_munmap_exit, pid: %ld, tgid: %ld]", pidns.pid, pidns.tgid);}
-    SendEvent(NULL, true, &pidns);
+    if((long)PT_REGS_RC(ctx) == 0)
+    {
+        SendEvent(NULL, true, &pidns);
+    }
+    else
+    {
+        DiscardEvent(&pidns);
+    }
     return 0;
 }
 
@@ -402,7 +483,12 @@ int BPF_KPROBE(uprobe_calloc, int count, unsigned long size)
     }
 
     {BPF_PRINTK("[***** calloc_enter, pid: %ld, tgid: %ld, size: %ld]", pidns.pid, pidns.tgid, size*count);}
-    ResourceAllocHelper(size*count, ctx, &pidns);
+    unsigned long totalSize = 0;
+    if(count < 0 || CheckedArraySize(size, (unsigned long)count, &totalSize) == false)
+    {
+        return 0;
+    }
+    ResourceAllocHelper(totalSize, ctx, &pidns);
     return 0;
 }
 
@@ -441,6 +527,11 @@ int BPF_KPROBE(uprobe_realloc, void* ptr, unsigned long size)
 
     {BPF_PRINTK("[***** realloc_enter, pid:%ld, tgid: %ld, size:%ld]", pidns.pid, pidns.tgid, size);}
     ResourceAllocHelper(size, ctx, &pidns);
+    struct ResourceInformation* event = bpf_map_lookup_elem(&argsHashMap, &pidns.pid);
+    if(event != NULL)
+    {
+        event->previousAddress = (unsigned long)ptr;
+    }
     return 0;
 }
 
@@ -479,7 +570,17 @@ int BPF_KPROBE(uprobe_reallocarray, void* ptr, long count, unsigned long size)
     }
 
     {BPF_PRINTK("[***** reallocarray_enter, pid: %ld, tgid: %ld, size: %ld]", pidns.pid, pidns.tgid, size*count);}
-    ResourceAllocHelper(size*count, ctx, &pidns);
+    unsigned long totalSize = 0;
+    if(count < 0 || CheckedArraySize(size, (unsigned long)count, &totalSize) == false)
+    {
+        return 0;
+    }
+    ResourceAllocHelper(totalSize, ctx, &pidns);
+    struct ResourceInformation* event = bpf_map_lookup_elem(&argsHashMap, &pidns.pid);
+    if(event != NULL)
+    {
+        event->previousAddress = (unsigned long)ptr;
+    }
     return 0;
 }
 

@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use std::ffi::c_void;
 use std::io;
 use std::mem::size_of;
+use std::time::{Duration, Instant};
 
 const WAIT_ALL_THREADS: i32 = 0x4000_0000;
 const NT_PRSTATUS: usize = 1;
@@ -18,7 +19,10 @@ pub(super) struct AttachedThreads {
 }
 
 impl AttachedThreads {
-    pub(super) fn attach_process(pid: i32) -> Result<Self, CorexError> {
+    pub(super) fn attach_process(
+        pid: i32,
+        cancellation: Option<&crate::engine::CancellationToken>,
+    ) -> Result<Self, CorexError> {
         let mut attached = Self { tids: Vec::new() };
         let mut known = HashSet::new();
         loop {
@@ -28,9 +32,12 @@ impl AttachedThreads {
                 break;
             }
             for tid in additions {
-                attach(tid)?;
+                check_cancelled(cancellation)?;
+                if !attach(tid)? {
+                    continue;
+                }
                 attached.tids.push(tid);
-                wait_stopped(tid)?;
+                wait_stopped(tid, cancellation)?;
             }
         }
         attached
@@ -42,26 +49,51 @@ impl AttachedThreads {
     pub(super) fn tids(&self) -> &[i32] {
         &self.tids
     }
+
+    pub(super) fn finish(mut self) -> Result<(), CorexError> {
+        self.detach_all()
+    }
+
+    fn detach_all(&mut self) -> Result<(), CorexError> {
+        let mut failed = Vec::new();
+        let mut first_error = None;
+        while let Some(tid) = self.tids.pop() {
+            let result = unsafe {
+                libc::ptrace(
+                    libc::PTRACE_DETACH,
+                    tid,
+                    std::ptr::null_mut::<c_void>(),
+                    std::ptr::null_mut::<c_void>(),
+                )
+            };
+            if result == -1 {
+                let error = io::Error::last_os_error();
+                first_error.get_or_insert_with(|| {
+                    CorexError::Ptrace(format!("failed to detach from thread {tid}: {error}"))
+                });
+                failed.push(tid);
+            }
+        }
+        self.tids = failed;
+        first_error.map_or(Ok(()), Err)
+    }
 }
 
 impl Drop for AttachedThreads {
     fn drop(&mut self) {
-        for tid in &self.tids {
-            unsafe {
-                libc::ptrace(
-                    libc::PTRACE_DETACH,
-                    *tid,
-                    std::ptr::null_mut::<c_void>(),
-                    std::ptr::null_mut::<c_void>(),
-                );
-            }
+        if let Err(error) = self.detach_all() {
+            eprintln!("warning: {error}");
         }
     }
 }
 
-pub(super) fn read_thread_states(tids: &[i32]) -> Result<Vec<ThreadState>, CorexError> {
+pub(super) fn read_thread_states(
+    tids: &[i32],
+    cancellation: Option<&crate::engine::CancellationToken>,
+) -> Result<Vec<ThreadState>, CorexError> {
     tids.iter()
         .map(|tid| {
+            check_cancelled(cancellation)?;
             Ok(ThreadState {
                 tid: *tid,
                 gp_regs: read_regset(*tid, NT_PRSTATUS, gp_regset_size())?,
@@ -72,7 +104,17 @@ pub(super) fn read_thread_states(tids: &[i32]) -> Result<Vec<ThreadState>, Corex
         .collect()
 }
 
-fn attach(tid: i32) -> Result<(), CorexError> {
+fn check_cancelled(
+    cancellation: Option<&crate::engine::CancellationToken>,
+) -> Result<(), CorexError> {
+    if cancellation.is_some_and(crate::engine::CancellationToken::is_cancelled) {
+        Err(CorexError::Cancelled)
+    } else {
+        Ok(())
+    }
+}
+
+fn attach(tid: i32) -> Result<bool, CorexError> {
     let result = unsafe {
         libc::ptrace(
             libc::PTRACE_ATTACH,
@@ -82,20 +124,38 @@ fn attach(tid: i32) -> Result<(), CorexError> {
         )
     };
     if result == -1 {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::ESRCH) {
+            return Ok(false);
+        }
         return Err(CorexError::Ptrace(format!(
             "failed to attach to thread {tid}: {}",
-            io::Error::last_os_error()
+            error
         )));
     }
-    Ok(())
+    Ok(true)
 }
 
-fn wait_stopped(tid: i32) -> Result<(), CorexError> {
+fn wait_stopped(
+    tid: i32,
+    cancellation: Option<&crate::engine::CancellationToken>,
+) -> Result<(), CorexError> {
     let mut status = 0;
+    let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let result = unsafe { libc::waitpid(tid, &mut status, WAIT_ALL_THREADS) };
+        check_cancelled(cancellation)?;
+        let result = unsafe { libc::waitpid(tid, &mut status, WAIT_ALL_THREADS | libc::WNOHANG) };
         if result == tid {
             break;
+        }
+        if result == 0 {
+            if Instant::now() >= deadline {
+                return Err(CorexError::Ptrace(format!(
+                    "timed out waiting for thread {tid} to stop"
+                )));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+            continue;
         }
         let error = io::Error::last_os_error();
         if error.kind() != io::ErrorKind::Interrupted {
@@ -187,6 +247,17 @@ mod tests {
     fn aarch64_register_layouts_match_kernel_uapi() {
         assert_eq!(gp_regset_size(), 272);
         assert_eq!(fp_regset_size(), 528);
+    }
+
+    #[test]
+    fn cancellation_stops_corex_work() {
+        let cancellation = crate::engine::CancellationToken::default();
+        cancellation.cancel();
+
+        assert!(matches!(
+            check_cancelled(Some(&cancellation)),
+            Err(CorexError::Cancelled)
+        ));
     }
 
     #[cfg(target_arch = "x86_64")]

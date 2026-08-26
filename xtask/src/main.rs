@@ -3,6 +3,7 @@ use std::ffi::OsStr;
 use std::fmt;
 use std::fs;
 use std::io;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
@@ -116,6 +117,14 @@ fn stage_tests() -> Result<(), XtaskError> {
         &paths.workspace.join("tests/integration"),
         &paths.stage.join("tests/integration"),
     )?;
+    let test_web_api = paths.stage.join("tests/integration/TestWebApi");
+    fs::set_permissions(&test_web_api, fs::Permissions::from_mode(0o755)).map_err(|source| {
+        XtaskError::Io {
+            operation: "secure staged TestWebApi directory",
+            path: test_web_api,
+            source,
+        }
+    })?;
     add_staged_fail_fast_check(&paths.stage.join("tests/integration/helpers.sh"))?;
     copy_file(
         &paths.workspace.join("nuget.config"),
@@ -285,9 +294,15 @@ fn run_scenario(filter: &OsStr) -> Result<(), XtaskError> {
     if !scenario.is_file() {
         return Err(XtaskError::MissingScenario(scenario));
     }
-    let mut command = Command::new(&scenario);
+    let mut command = scenario_command(&scenario);
     command.current_dir(scenario.parent().unwrap_or(&paths.stage));
     run_checked(&mut command, "run integration scenario")
+}
+
+fn scenario_command(scenario: &Path) -> Command {
+    let mut command = Command::new(scenario);
+    command.arg("../../../procdump");
+    command
 }
 
 fn run_integration(filter: Option<&OsStr>) -> Result<(), XtaskError> {
@@ -534,5 +549,16 @@ mod tests {
         let updated = fs::read_to_string(&helper).unwrap();
         assert!(updated.contains("ProcDump exited before creating"));
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn single_scenario_receives_staged_procdump_path() {
+        let command = scenario_command(Path::new("scenario.sh"));
+
+        assert_eq!(command.get_program(), "scenario.sh");
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            [OsStr::new("../../../procdump")]
+        );
     }
 }

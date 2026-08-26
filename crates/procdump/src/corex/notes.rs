@@ -8,7 +8,6 @@ const NT_AUXV: u32 = 6;
 const NT_SIGINFO: u32 = 0x5349_4749;
 const NT_FILE: u32 = 0x4649_4c45;
 const NT_ARM_PAC_MASK: u32 = 0x406;
-const PAGE_SIZE: u64 = 4096;
 const PRSTATUS_REG_OFFSET: usize = 112;
 
 pub(super) fn build(process: &ProcessInfo, threads: &[ThreadState]) -> Result<Vec<u8>, CorexError> {
@@ -117,11 +116,11 @@ fn file_note(process: &ProcessInfo) -> Option<Vec<u8>> {
     let names_size: usize = mappings.iter().map(|mapping| mapping.path.len() + 1).sum();
     let mut descriptor = Vec::with_capacity(16 + mappings.len() * 24 + names_size);
     descriptor.extend_from_slice(&(mappings.len() as u64).to_ne_bytes());
-    descriptor.extend_from_slice(&PAGE_SIZE.to_ne_bytes());
+    descriptor.extend_from_slice(&process.page_size.to_ne_bytes());
     for mapping in &mappings {
         descriptor.extend_from_slice(&mapping.start.to_ne_bytes());
         descriptor.extend_from_slice(&mapping.end.to_ne_bytes());
-        descriptor.extend_from_slice(&(mapping.offset / PAGE_SIZE).to_ne_bytes());
+        descriptor.extend_from_slice(&(mapping.offset / process.page_size).to_ne_bytes());
     }
     for mapping in mappings {
         descriptor.extend_from_slice(mapping.path.as_bytes());
@@ -196,6 +195,7 @@ mod tests {
             }],
             auxv: vec![0; 16],
             coredump_filter: 0x33,
+            page_size: 4096,
             tids: vec![42],
         }
     }
@@ -213,7 +213,7 @@ mod tests {
     fn file_note_uses_page_offsets() {
         let descriptor = file_note(&process()).unwrap();
         assert_eq!(&descriptor[0..8], &1_u64.to_ne_bytes());
-        assert_eq!(&descriptor[8..16], &PAGE_SIZE.to_ne_bytes());
+        assert_eq!(&descriptor[8..16], &process().page_size.to_ne_bytes());
         assert!(descriptor.ends_with(b"/tmp/worker\0"));
     }
 }
