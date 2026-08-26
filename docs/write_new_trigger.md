@@ -5,7 +5,7 @@ trigger should fit that architecture and reuse the shared dump coordinator.
 
 ## 1. Extend configuration
 
-Add the parsed representation to `crates/procdump-core/src/config.rs`:
+Add the parsed representation to `crates/procdump/src/config.rs`:
 
 * Parse both supported switch prefixes where appropriate.
 * Validate platform capabilities and incompatible combinations.
@@ -16,7 +16,7 @@ changes.
 
 ## 2. Implement the monitor
 
-Place shared monitor control in `crates/procdump-core/src/monitor.rs`. Put
+Place shared monitor control in `crates/procdump/src/monitor.rs`. Put
 platform-specific implementation details in a focused module.
 
 A trigger thread should:

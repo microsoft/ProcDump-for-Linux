@@ -1,8 +1,8 @@
 [workspace]
 members = [
+    "crates/procdump",
     "crates/procdump-capi",
     "crates/procdump-cli",
-    "crates/procdump-core",
     "xtask",
 ]
 resolver = "3"

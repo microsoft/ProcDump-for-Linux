@@ -32,14 +32,14 @@ See [BUILD.md](BUILD.md) for prerequisites and cross-target commands.
 
 ## Repository ownership
 
-* Shared behavior belongs in `crates/procdump-core`.
+* Shared behavior and the supported Rust API belong in `crates/procdump`.
 * Platform-specific process access belongs behind the `ProcessDiscovery` and
   `ProcessMetrics` traits.
 * Platform-specific dump generation belongs behind `DumpBackend`.
 * The CLI belongs in `crates/procdump-cli`.
 * The static C ABI belongs in `crates/procdump-capi`.
-* Linux eBPF and the injected CLR profiler are retained native components under
-  `native/`; userspace orchestration remains Rust.
+* Linux eBPF and the injected CLR profiler are optional native components under
+  `crates/procdump/native/`; userspace orchestration remains Rust.
 
 Preserve the existing one-thread-per-trigger monitor architecture unless a design
 change is explicitly approved.

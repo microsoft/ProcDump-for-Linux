@@ -31,8 +31,8 @@ impl Capabilities {
             Platform::Linux => Self {
                 process_groups: true,
                 signal_triggers: true,
-                dotnet_triggers: true,
-                resource_tracking: true,
+                dotnet_triggers: cfg!(feature = "dotnet-triggers"),
+                resource_tracking: cfg!(feature = "restrack"),
                 custom_dump_mask: true,
                 native_core_writer: true,
             },
@@ -902,6 +902,7 @@ mod tests {
         assert_eq!(config.threshold_seconds, DEFAULT_THRESHOLD_SECONDS);
     }
 
+    #[cfg(feature = "dotnet-triggers")]
     #[test]
     fn parses_loh_gc_threshold_scenario() {
         let config = parse_test(
@@ -921,6 +922,7 @@ mod tests {
         assert!(!config.timer_trigger);
     }
 
+    #[cfg(feature = "dotnet-triggers")]
     #[test]
     fn parses_histogram_percentile_counter() {
         let config = parse_test(
@@ -958,6 +960,7 @@ mod tests {
         assert!(matches!(cpu, Err(ParseError::InvalidCombination(_))));
     }
 
+    #[cfg(feature = "restrack")]
     #[test]
     fn restrack_timer_requires_explicit_seconds() {
         let manual = parse_test(&["-restrack", "42"], Platform::Linux).unwrap();

@@ -1,20 +1,11 @@
 #![allow(unsafe_code)]
 
-use procdump_core::config::{OutputSpec, Platform};
-use procdump_core::dump::{DumpBackend, DumpKind, DumpRequest, PlatformDumpBackend};
-use procdump_core::process::{ProcessDiscovery, ProcessId};
-use std::ffi::{CStr, CString, c_char, c_int};
-#[cfg(target_os = "linux")]
-use std::fs;
+use procdump::{WriteDumpError, WriteDumpOptions};
+use std::ffi::{CString, c_char, c_int};
 use std::os::unix::ffi::OsStrExt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::ptr;
-
-#[cfg(target_os = "linux")]
-use procdump_core::process::linux::LinuxProcfs as NativeProcesses;
-#[cfg(target_os = "macos")]
-use procdump_core::process::macos::MacOsProcesses as NativeProcesses;
 
 const PD_DUMP_MASK_DEFAULT: c_int = -1;
 
@@ -70,110 +61,29 @@ fn write_dump(
     overwrite: bool,
 ) -> Result<(), String> {
     if process_id <= 0 || dump_path.is_null() {
-        return Err("Invalid argument: a valid processId and dumpPath are required.".into());
+        return Err(WriteDumpError::InvalidArgument.to_string());
     }
-    let path_bytes = unsafe { CStr::from_ptr(dump_path) }.to_bytes();
+    let path_bytes = unsafe { std::ffi::CStr::from_ptr(dump_path) }.to_bytes();
     if path_bytes.is_empty() {
-        return Err("Invalid argument: a valid processId and dumpPath are required.".into());
+        return Err(WriteDumpError::InvalidArgument.to_string());
     }
-    let path = PathBuf::from(std::ffi::OsStr::from_bytes(path_bytes));
-    let directory = path.parent().unwrap_or_else(|| Path::new("."));
-    if !directory.is_dir() {
-        return Err(format!(
-            "Invalid directory (\"{}\") provided for core dump output.",
-            directory.display()
-        ));
-    }
-
-    let pid = ProcessId::new(process_id).map_err(|error| error.to_string())?;
-    let processes = NativeProcesses::new().map_err(|error| error.to_string())?;
-    let process_name = processes.name(pid).map_err(|error| error.to_string())?;
-    let _mask = CoreDumpMaskGuard::apply(pid, dump_mask)?;
-    PlatformDumpBackend
-        .write_dump(&DumpRequest {
-            pid,
-            process_name,
-            kind: DumpKind::Manual,
-            output: OutputSpec {
-                directory: if directory.as_os_str().is_empty() {
-                    PathBuf::from(".")
-                } else {
-                    directory.to_path_buf()
-                },
-                file_name: path.file_name().map(std::ffi::OsStr::to_owned),
-            },
-            overwrite,
-            use_gcore: false,
-            platform: native_platform(),
-        })
-        .map(|_| ())
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(target_os = "linux")]
-fn native_platform() -> Platform {
-    Platform::Linux
-}
-
-#[cfg(target_os = "macos")]
-fn native_platform() -> Platform {
-    Platform::MacOs
-}
-
-struct CoreDumpMaskGuard {
-    #[cfg(target_os = "linux")]
-    path: Option<PathBuf>,
-    #[cfg(target_os = "linux")]
-    previous: Option<u32>,
-}
-
-impl CoreDumpMaskGuard {
-    #[cfg(target_os = "linux")]
-    fn apply(pid: ProcessId, mask: c_int) -> Result<Self, String> {
-        if mask == PD_DUMP_MASK_DEFAULT {
-            return Ok(Self {
-                path: None,
-                previous: None,
-            });
-        }
-        if mask < 0 {
-            return Err("Invalid core dump mask specified.".into());
-        }
-        let path = PathBuf::from(format!("/proc/{}/coredump_filter", pid.get()));
-        let previous_text = fs::read_to_string(&path)
-            .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
-        let previous = u32::from_str_radix(previous_text.trim(), 16).map_err(|_| {
-            format!(
-                "Failed to parse core dump mask from {}: {}",
-                path.display(),
-                previous_text.trim()
-            )
-        })?;
-        fs::write(&path, mask.to_string())
-            .map_err(|error| format!("Failed to write {}: {error}", path.display()))?;
-        Ok(Self {
-            path: Some(path),
-            previous: Some(previous),
-        })
-    }
-
-    #[cfg(target_os = "macos")]
-    fn apply(_pid: ProcessId, mask: c_int) -> Result<Self, String> {
-        if mask == PD_DUMP_MASK_DEFAULT {
-            Ok(Self {})
-        } else {
-            Err("Custom core dump masks are not supported on macOS.".into())
-        }
-    }
-}
-
-impl Drop for CoreDumpMaskGuard {
-    fn drop(&mut self) {
-        #[cfg(target_os = "linux")]
-        if let (Some(path), Some(previous)) = (&self.path, &self.previous) {
-            let _ = fs::write(path, previous.to_string());
-        }
-    }
+    let core_dump_mask = match dump_mask {
+        PD_DUMP_MASK_DEFAULT => None,
+        value if value < 0 => return Err(WriteDumpError::InvalidCoreDumpMask.to_string()),
+        value => Some(value as u32),
+    };
+    let path = Path::new(std::ffi::OsStr::from_bytes(path_bytes));
+    procdump::write_dump(
+        process_id,
+        path,
+        core_dump_mask
+            .map_or_else(WriteDumpOptions::default, |mask| {
+                WriteDumpOptions::default().core_dump_mask(mask)
+            })
+            .overwrite(overwrite),
+    )
+    .map(|_| ())
+    .map_err(|error| error.to_string())
 }
 
 fn set_error(error: *mut *mut c_char, message: &str) {
@@ -195,6 +105,7 @@ fn set_error_pointer(error: *mut *mut c_char, value: *mut c_char) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::CStr;
 
     #[test]
     fn rejects_invalid_arguments_and_allocates_error() {
@@ -205,6 +116,20 @@ mod tests {
         assert!(!error.is_null());
         let message = unsafe { CStr::from_ptr(error) }.to_string_lossy();
         assert!(message.contains("Invalid argument"));
+        unsafe { pdFreeError(error) };
+    }
+
+    #[test]
+    fn rejects_negative_non_default_mask() {
+        let path = CString::new("/tmp/core").unwrap();
+        let mut error = ptr::null_mut();
+        let result = unsafe { pdWriteDump(1, path.as_ptr(), -2, false, &raw mut error) };
+
+        assert_eq!(result, -1);
+        assert_eq!(
+            unsafe { CStr::from_ptr(error) }.to_string_lossy(),
+            "Invalid core dump mask specified."
+        );
         unsafe { pdFreeError(error) };
     }
 

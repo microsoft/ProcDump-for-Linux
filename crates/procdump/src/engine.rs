@@ -1,13 +1,26 @@
-#![allow(unsafe_code)]
-
-use crate::config::{OutputSpec, Platform};
-use crate::process::ProcessId;
 use std::ffi::{CStr, OsStr, OsString};
 use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Platform {
+    Linux,
+    MacOs,
+}
+
+impl Platform {
+    pub fn native() -> Result<Self, crate::WriteDumpError> {
+        #[cfg(target_os = "linux")]
+        return Ok(Self::Linux);
+        #[cfg(target_os = "macos")]
+        return Ok(Self::MacOs);
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        return Err(crate::WriteDumpError::UnsupportedPlatform);
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DumpKind {
@@ -39,8 +52,14 @@ impl DumpKind {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OutputSpec {
+    pub directory: PathBuf,
+    pub file_name: Option<OsString>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DumpRequest {
-    pub pid: ProcessId,
+    pub pid: i32,
     pub process_name: OsString,
     pub kind: DumpKind,
     pub output: OutputSpec,
@@ -61,65 +80,62 @@ pub struct PlatformDumpBackend;
 
 impl DumpBackend for PlatformDumpBackend {
     fn write_dump(&self, request: &DumpRequest) -> Result<PathBuf, DumpError> {
-        #[cfg(target_os = "linux")]
-        if request.platform == Platform::Linux {
-            let socket = crate::dotnet::find_diagnostics_socket(request.pid)
-                .map_err(|error| DumpError::DotNet(error.to_string()))?;
-            if let Some(socket) = socket {
-                let timestamp = local_timestamp()?;
-                let paths = dump_paths(request, &timestamp)?;
-                if paths.prefix.exists() && !request.overwrite {
-                    return Err(DumpError::AlreadyExists(paths.prefix));
-                }
-                ensure_writable_directory(&request.output.directory)?;
-                crate::dotnet::generate_dump(&socket, &paths.prefix)
-                    .map_err(|error| DumpError::DotNet(error.to_string()))?;
-                if !paths.prefix.is_file() {
-                    return Err(DumpError::DotNet(format!(
-                        ".NET runtime reported success but did not create {}",
-                        paths.prefix.display()
-                    )));
-                }
-                return Ok(paths.prefix);
-            }
-            if !request.use_gcore {
-                return CorexBackend.write_dump(request);
-            }
-        }
-        GcoreBackend.write_dump(request)
+        write_dump(request)
     }
 }
 
-#[cfg(target_os = "linux")]
-#[derive(Clone, Debug, Default)]
-struct CorexBackend;
+pub fn write_dump(request: &DumpRequest) -> Result<PathBuf, DumpError> {
+    #[cfg(target_os = "linux")]
+    if request.platform == Platform::Linux {
+        let socket = crate::dotnet::find_diagnostics_socket(request.pid)
+            .map_err(|error| DumpError::DotNet(error.to_string()))?;
+        if let Some(socket) = socket {
+            let timestamp = local_timestamp()?;
+            let paths = dump_paths(request, &timestamp)?;
+            if paths.prefix.exists() && !request.overwrite {
+                return Err(DumpError::AlreadyExists(paths.prefix));
+            }
+            ensure_writable_directory(&request.output.directory)?;
+            crate::dotnet::generate_dump(&socket, &paths.prefix)
+                .map_err(|error| DumpError::DotNet(error.to_string()))?;
+            if !paths.prefix.is_file() {
+                return Err(DumpError::DotNet(format!(
+                    ".NET runtime reported success but did not create {}",
+                    paths.prefix.display()
+                )));
+            }
+            return Ok(paths.prefix);
+        }
+        if !request.use_gcore {
+            return write_corex_dump(request);
+        }
+    }
+    GcoreBackend.write_dump(request)
+}
 
 #[cfg(target_os = "linux")]
-impl DumpBackend for CorexBackend {
-    fn write_dump(&self, request: &DumpRequest) -> Result<PathBuf, DumpError> {
-        let timestamp = local_timestamp()?;
-        let paths = dump_paths(request, &timestamp)?;
-        if paths.final_path.exists() && !request.overwrite {
-            return Err(DumpError::AlreadyExists(paths.final_path));
-        }
-        ensure_writable_directory(&request.output.directory)?;
-        crate::corex::dump_pid(request.pid.get(), &paths.final_path)
-            .map_err(|error| DumpError::Corex(error.to_string()))?;
-        if !paths.final_path.is_file() {
-            return Err(DumpError::Corex(format!(
-                "corex reported success but did not create {}",
-                paths.final_path.display()
-            )));
-        }
-        Ok(paths.final_path)
+fn write_corex_dump(request: &DumpRequest) -> Result<PathBuf, DumpError> {
+    let timestamp = local_timestamp()?;
+    let paths = dump_paths(request, &timestamp)?;
+    if paths.final_path.exists() && !request.overwrite {
+        return Err(DumpError::AlreadyExists(paths.final_path));
     }
+    ensure_writable_directory(&request.output.directory)?;
+    crate::corex::dump_pid(request.pid, &paths.final_path)
+        .map_err(|error| DumpError::Corex(error.to_string()))?;
+    if !paths.final_path.is_file() {
+        return Err(DumpError::Corex(format!(
+            "corex reported success but did not create {}",
+            paths.final_path.display()
+        )));
+    }
+    Ok(paths.final_path)
 }
 
 impl DumpBackend for GcoreBackend {
     fn write_dump(&self, request: &DumpRequest) -> Result<PathBuf, DumpError> {
         let timestamp = local_timestamp()?;
         let paths = dump_paths(request, &timestamp)?;
-
         if paths.final_path.exists() && !request.overwrite {
             return Err(DumpError::AlreadyExists(paths.final_path));
         }
@@ -132,13 +148,12 @@ impl DumpBackend for GcoreBackend {
         let output = Command::new("gcore")
             .arg("-o")
             .arg(output_argument)
-            .arg(request.pid.get().to_string())
+            .arg(request.pid.to_string())
             .output()
             .map_err(|source| DumpError::Start {
                 program: "gcore",
                 source,
             })?;
-
         if !output.status.success() || !paths.final_path.is_file() {
             remove_if_present(&paths.final_path);
             return Err(DumpError::Backend {
@@ -146,7 +161,6 @@ impl DumpBackend for GcoreBackend {
                 output: combined_output(&output.stdout, &output.stderr),
             });
         }
-
         Ok(paths.final_path)
     }
 }
@@ -173,17 +187,15 @@ fn dump_paths(request: &DumpRequest, timestamp: &str) -> Result<DumpPaths, DumpE
             .file_name()
             .and_then(OsStr::to_str)
             .ok_or_else(|| DumpError::InvalidPath(prefix.clone()))?,
-        request.pid.get()
+        request.pid
     ));
-
     if !is_legacy_safe_path(&prefix) || !is_legacy_safe_path(&final_path) {
         return Err(DumpError::InvalidPath(final_path));
     }
     Ok(DumpPaths { prefix, final_path })
 }
 
-#[cfg(target_os = "linux")]
-pub(crate) fn sidecar_path(request: &DumpRequest, extension: &str) -> Result<PathBuf, DumpError> {
+pub fn sidecar_path(request: &DumpRequest, extension: &str) -> Result<PathBuf, DumpError> {
     let paths = dump_paths(request, &local_timestamp()?)?;
     let file_name = paths
         .final_path
@@ -349,7 +361,7 @@ mod tests {
 
     fn request(output: OutputSpec) -> DumpRequest {
         DumpRequest {
-            pid: ProcessId::new(42).unwrap(),
+            pid: 42,
             process_name: OsString::from("worker pool[1]"),
             kind: DumpKind::Cpu,
             output,
@@ -369,7 +381,6 @@ mod tests {
             "260825_101112",
         )
         .unwrap();
-
         assert_eq!(
             paths.prefix,
             PathBuf::from("/tmp/worker_pool_1__cpu_260825_101112")
@@ -390,7 +401,6 @@ mod tests {
             "ignored",
         )
         .unwrap();
-
         assert_eq!(paths.prefix, PathBuf::from("/tmp/custom.core"));
         assert_eq!(paths.final_path, PathBuf::from("/tmp/custom.core.42"));
     }
@@ -405,7 +415,6 @@ mod tests {
             "260825_101112",
         )
         .unwrap_err();
-
         assert!(matches!(error, DumpError::InvalidPath(_)));
     }
 }

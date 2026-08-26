@@ -60,6 +60,9 @@ extends:
               gcc --version
             displayName: 'List compiler versions'
 
+          - script: cargo xtask verify-rust-package
+            displayName: 'Verify Rust API package'
+
           - template: templates/build.yaml@ProcDump
 
           - script: |

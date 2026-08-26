@@ -56,6 +56,37 @@ This produces:
 * `target/release/libprocdump.a`
 * Public C header: `crates/procdump-capi/include/ProcDumpLib.h`
 
+The safe Rust API is packaged independently for the internal Azure Artifacts
+Cargo feed. Verify the exact source archive before release, then publish from a
+clean, authenticated release checkout:
+
+```bash
+cargo xtask verify-rust-package
+cargo xtask publish-rust-package
+```
+
+The publish command targets `Tools_PublicPackages`; authentication is provided
+by the Azure Artifacts Cargo credential provider and is never stored in the
+repository.
+
+## Rust API features
+
+The `procdump` package builds immediate dump generation by default. Optional
+capabilities are additive:
+
+* `monitor`: CPU, memory, thread, file descriptor, signal, and timer triggers
+* `dotnet-triggers`: exception, GC, and performance-counter triggers
+* `restrack`: eBPF allocation tracking and leak reports
+* `full`: all capabilities used by the CLI
+
+Examples:
+
+```bash
+cargo test -p procdump
+cargo test -p procdump --features monitor
+cargo test -p procdump --features full
+```
+
 ## Integration tests
 
 Cargo stages the release binary, static library, native fixtures, and unchanged
@@ -80,7 +111,7 @@ its scenarios:
 
 ```bash
 rustup target add x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin
-cargo clippy -p procdump-core --target x86_64-unknown-linux-gnu -- -D warnings
+cargo clippy -p procdump --features full --target x86_64-unknown-linux-gnu -- -D warnings
 cargo clippy --workspace --target aarch64-apple-darwin -- -D warnings
 cargo clippy --workspace --target x86_64-apple-darwin -- -D warnings
 ```

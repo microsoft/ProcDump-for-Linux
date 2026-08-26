@@ -1,14 +1,14 @@
-use procdump_core::config::{self, Platform};
-use procdump_core::dump::PlatformDumpBackend;
-use procdump_core::orchestrator::monitor_processes;
+use procdump::config::{self, Platform};
+use procdump::dump::PlatformDumpBackend;
+use procdump::orchestrator::monitor_processes;
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
 
 #[cfg(target_os = "linux")]
-use procdump_core::process::linux::LinuxProcfs as NativeProcesses;
+use procdump::process::linux::LinuxProcfs as NativeProcesses;
 #[cfg(target_os = "macos")]
-use procdump_core::process::macos::MacOsProcesses as NativeProcesses;
+use procdump::process::macos::MacOsProcesses as NativeProcesses;
 
 fn main() -> ExitCode {
     match run() {

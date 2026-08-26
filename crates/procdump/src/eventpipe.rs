@@ -53,7 +53,7 @@ fn run_counter_monitor(
     interval: Duration,
     snooze: Duration,
 ) -> Result<(), EventPipeError> {
-    let socket = crate::dotnet::find_diagnostics_socket(identity.pid)
+    let socket = crate::internal::find_diagnostics_socket(identity.pid.get())
         .map_err(|error| EventPipeError::Diagnostics(error.to_string()))?
         .ok_or(EventPipeError::NotManaged)?;
     let providers = unique_providers(triggers);

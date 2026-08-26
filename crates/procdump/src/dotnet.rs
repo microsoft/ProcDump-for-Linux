@@ -1,4 +1,3 @@
-use crate::process::ProcessId;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -12,12 +11,12 @@ const DUMP_COMMAND_ID: u8 = 0x01;
 const FULL_DUMP_TYPE: u32 = 4;
 const DUMP_LOGGING_OFF: u32 = 0;
 
-pub(crate) fn find_diagnostics_socket(pid: ProcessId) -> Result<Option<PathBuf>, DotNetError> {
+pub fn find_diagnostics_socket(pid: i32) -> Result<Option<PathBuf>, DotNetError> {
     let socket_table = fs::read_to_string("/proc/net/unix").map_err(DotNetError::SocketTable)?;
     let temporary = std::env::var_os("TMPDIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/tmp"));
-    let prefix = temporary.join(format!("dotnet-diagnostic-{}-", pid.get()));
+    let prefix = temporary.join(format!("dotnet-diagnostic-{pid}-"));
     Ok(find_socket_in_table(&socket_table, &prefix))
 }
 
@@ -96,7 +95,7 @@ fn build_dump_packet(output: &Path) -> Result<Vec<u8>, DotNetError> {
 }
 
 #[derive(Debug)]
-pub(crate) enum DotNetError {
+pub enum DotNetError {
     SocketTable(io::Error),
     Connect { socket: PathBuf, source: io::Error },
     Configure(io::Error),
@@ -136,8 +135,6 @@ impl std::fmt::Display for DotNetError {
         }
     }
 }
-
-impl std::error::Error for DotNetError {}
 
 #[cfg(test)]
 mod tests {

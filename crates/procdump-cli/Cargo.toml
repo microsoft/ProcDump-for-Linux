@@ -10,7 +10,7 @@ name = "procdump"
 path = "src/main.rs"
 
 [dependencies]
-procdump-core = { path = "../procdump-core" }
+procdump = { path = "../procdump", features = ["full"] }
 
 [lints]
 workspace = true

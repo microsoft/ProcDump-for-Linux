@@ -35,6 +35,14 @@ fn run() -> Result<(), XtaskError> {
             stage_tests()?;
             run_integration(filter.as_deref())
         }
+        Some("verify-rust-package") => {
+            reject_extra(arguments)?;
+            rust_package(true)
+        }
+        Some("publish-rust-package") => {
+            reject_extra(arguments)?;
+            rust_package(false)
+        }
         Some("help") | Some("-h") | Some("--help") => {
             println!("{}", usage());
             Ok(())
@@ -48,7 +56,28 @@ fn usage() -> &'static str {
      Commands:\n\
        stage-tests                 Build and stage integration artifacts\n\
        test-scenario <name>        Run one staged scenario without forcing elevation\n\
-       test-integration [filter]   Run the existing root-required integration runner"
+       test-integration [filter]   Run the existing root-required integration runner\n\
+       verify-rust-package         Build and verify the Azure Cargo source package\n\
+       publish-rust-package        Publish a clean release to Tools_PublicPackages"
+}
+
+fn rust_package(verify_only: bool) -> Result<(), XtaskError> {
+    let paths = Paths::discover()?;
+    let mut command = Command::new("cargo");
+    command.current_dir(&paths.workspace);
+    if verify_only {
+        command.args(["package", "-p", "procdump", "--allow-dirty"]);
+        run_checked(&mut command, "verify procdump Cargo package")
+    } else {
+        command.args([
+            "publish",
+            "-p",
+            "procdump",
+            "--registry",
+            "Tools_PublicPackages",
+        ]);
+        run_checked(&mut command, "publish procdump Cargo package")
+    }
 }
 
 fn stage_tests() -> Result<(), XtaskError> {

@@ -104,7 +104,7 @@ impl MonitorSet {
     ) -> Result<Self, MonitorError> {
         let control = Arc::new(MonitorControl::new());
         let mut threads = Vec::new();
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", feature = "restrack"))]
         let sidecar: Option<Arc<dyn DumpSidecar>> = if config.restrack.is_some() {
             let runtime = crate::restrack::spawn_restrack_monitors(
                 config,
@@ -117,7 +117,7 @@ impl MonitorSet {
         } else {
             None
         };
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(all(target_os = "linux", feature = "restrack")))]
         let sidecar: Option<Arc<dyn DumpSidecar>> = if config.restrack.is_some() {
             return Err(MonitorError::UnsupportedTrigger);
         } else {
@@ -142,7 +142,7 @@ impl MonitorSet {
         let polling = Duration::from_millis(config.polling_interval_ms);
         let snooze = Duration::from_secs(config.threshold_seconds);
 
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", feature = "dotnet-triggers"))]
         if config.dotnet_trigger.is_some() {
             threads.push(crate::profiler::spawn_profiler_monitor(
                 config,
@@ -150,11 +150,11 @@ impl MonitorSet {
                 identity,
             )?);
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(all(target_os = "linux", feature = "dotnet-triggers")))]
         if config.dotnet_trigger.is_some() {
             return Err(MonitorError::UnsupportedTrigger);
         }
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", feature = "dotnet-triggers"))]
         if !config.perf_counters.is_empty() {
             threads.push(crate::eventpipe::spawn_counter_monitor(
                 config,
@@ -163,7 +163,7 @@ impl MonitorSet {
                 identity,
             )?);
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(all(target_os = "linux", feature = "dotnet-triggers")))]
         if !config.perf_counters.is_empty() {
             return Err(MonitorError::UnsupportedTrigger);
         }

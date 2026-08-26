@@ -10,7 +10,7 @@ use the Rust corex ELF writer by default; managed dumps use .NET diagnostics
 IPC; macOS and the explicit Linux `-usegcore` fallback use `gcore`.
 
 The Linux eBPF kernel program and injected CLR profiler remain native
-components under `native/`, built and embedded by Cargo. Their userspace
+components under `crates/procdump/native/`, built and embedded by Cargo. Their userspace
 loading, monitoring, EventPipe handling, orchestration, reporting, and dump
 writing are Rust.
 
@@ -39,13 +39,18 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## Repository layout
 
-* `crates/procdump-core`: shared configuration, platform, monitoring, and dump logic
+* `crates/procdump`: safe Rust API and shared dump/monitoring implementation
 * `crates/procdump-cli`: command-line application
 * `crates/procdump-capi`: static C ABI and public header
-* `native/ebpf`: retained Linux eBPF kernel program
-* `native/profiler`: retained injected CLR profiler
+* `crates/procdump/native/ebpf`: optional Linux eBPF kernel program
+* `crates/procdump/native/profiler`: optional injected CLR profiler
 * `tests/integration`: unchanged compatibility scenarios and native test fixtures
 * `xtask`: Cargo staging and integration-test runner
+
+The `procdump` crate is also packaged as source for the internal
+`Tools_PublicPackages` Azure Artifacts Cargo feed. Its default feature set
+supports immediate dump generation; monitoring, .NET triggers, and restrack are
+additive features, while the CLI enables `full`.
 
 ## Usage
 **BREAKING CHANGE** With the release of ProcDump 1.3 the switches are now aligned with the Windows ProcDump version.

@@ -152,7 +152,7 @@ fn attach_profiler(
     profiler_path: &Path,
     client_data: &[u8],
 ) -> Result<(), ProfilerError> {
-    let socket = crate::dotnet::find_diagnostics_socket(identity.pid)
+    let socket = crate::internal::find_diagnostics_socket(identity.pid.get())
         .map_err(|error| ProfilerError::Diagnostics(error.to_string()))?
         .ok_or(ProfilerError::NotManaged)?;
     let packet = build_attach_packet(profiler_path, client_data)?;

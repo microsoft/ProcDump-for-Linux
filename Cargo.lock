@@ -534,22 +534,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "procdump-capi"
-version = "0.1.0"
-dependencies = [
- "libc",
- "procdump-core",
-]
-
-[[package]]
-name = "procdump-cli"
-version = "0.1.0"
-dependencies = [
- "procdump-core",
-]
-
-[[package]]
-name = "procdump-core"
+name = "procdump"
 version = "0.1.0"
 dependencies = [
  "blazesym",
@@ -557,6 +542,21 @@ dependencies = [
  "libbpf-rs",
  "libc",
  "signal-hook",
+]
+
+[[package]]
+name = "procdump-capi"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "procdump",
+]
+
+[[package]]
+name = "procdump-cli"
+version = "0.1.0"
+dependencies = [
+ "procdump",
 ]
 
 [[package]]

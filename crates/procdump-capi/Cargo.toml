@@ -12,7 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 libc.workspace = true
-procdump-core = { path = "../procdump-core" }
+procdump = { path = "../procdump" }
 
 [lints]
 workspace = true

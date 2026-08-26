@@ -1,20 +1,41 @@
+#[cfg(any(feature = "dotnet-triggers", feature = "restrack"))]
 use std::env;
-use std::path::PathBuf;
+#[cfg(any(feature = "dotnet-triggers", feature = "restrack"))]
+use std::path::Path;
+#[cfg(feature = "dotnet-triggers")]
 use std::process::Command;
 
+#[cfg(any(feature = "dotnet-triggers", feature = "restrack"))]
 fn main() {
-    println!("cargo:rerun-if-env-changed=CXX");
     let target = env::var("TARGET").expect("Cargo must set TARGET");
-    let host = env::var("HOST").expect("Cargo must set HOST");
     if !target.contains("linux") {
         return;
     }
 
-    let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let workspace = manifest.ancestors().nth(2).unwrap();
-    let profiler = workspace.join("native/profiler");
-    let output = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("procdumpprofiler.so");
-    let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+    #[cfg(any(feature = "dotnet-triggers", feature = "restrack"))]
+    let manifest = std::path::PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    #[cfg(any(feature = "dotnet-triggers", feature = "restrack"))]
+    let out_dir = std::path::PathBuf::from(env::var_os("OUT_DIR").unwrap());
+
+    #[cfg(feature = "dotnet-triggers")]
+    build_profiler(
+        &manifest,
+        &out_dir,
+        &target,
+        &env::var("HOST").expect("Cargo must set HOST"),
+    );
+    #[cfg(feature = "restrack")]
+    build_ebpf(&manifest, &out_dir, &target);
+}
+
+#[cfg(not(any(feature = "dotnet-triggers", feature = "restrack")))]
+fn main() {}
+
+#[cfg(feature = "dotnet-triggers")]
+fn build_profiler(manifest: &Path, out_dir: &Path, target: &str, host: &str) {
+    println!("cargo:rerun-if-env-changed=CXX");
+    let profiler = manifest.join("native/profiler");
+    let output = out_dir.join("procdumpprofiler.so");
     let sources = [
         "ClassFactory.cpp",
         "ProcDumpProfiler.cpp",
@@ -57,15 +78,18 @@ fn main() {
             "-DPLATFORM_UNIX",
             "-std=c++11",
         ]);
-    add_architecture_flags(&mut command, &target);
+    add_architecture_flags(&mut command, target);
 
     let status = command.status().expect("failed to start profiler compiler");
     assert!(
         status.success(),
         "failed to build retained ProcDump profiler"
     );
+}
 
-    let ebpf = workspace.join("native/ebpf");
+#[cfg(feature = "restrack")]
+fn build_ebpf(manifest: &Path, out_dir: &Path, target: &str) {
+    let ebpf = manifest.join("native/ebpf");
     println!("cargo:rerun-if-changed={}", ebpf.display());
     let (target_arch, multiarch_include) = if target.starts_with("x86_64") {
         ("-D__TARGET_ARCH_x86", "/usr/x86_64-linux-gnu/include")
@@ -93,6 +117,7 @@ fn main() {
         .expect("failed to build retained ProcDump eBPF program");
 }
 
+#[cfg(feature = "dotnet-triggers")]
 fn add_architecture_flags(command: &mut Command, target: &str) {
     if target.starts_with("x86_64") {
         command.args(["-DHOST_AMD64", "-DHOST_64BIT"]);
