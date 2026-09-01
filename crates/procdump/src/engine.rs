@@ -144,13 +144,7 @@ fn write_dump_inner(request: &DumpRequest) -> Result<PathBuf, DumpError> {
                 remove_if_present(&paths.prefix);
                 return Err(DumpError::DotNet(error.to_string()));
             }
-            if !paths.prefix.is_file() {
-                return Err(DumpError::DotNet(format!(
-                    ".NET runtime reported success but did not create {}",
-                    paths.prefix.display()
-                )));
-            }
-            return Ok(paths.prefix);
+            return verify_external_dump(paths.prefix);
         }
         #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
         if !request.use_gcore {
@@ -181,13 +175,15 @@ fn write_corex_dump(request: &DumpRequest) -> Result<PathBuf, DumpError> {
     }
     ensure_writable_directory(&request.output.directory)?;
     let output = open_output_file(&paths.final_path, request.overwrite)?;
-    crate::corex::dump_pid(
+    if let Err(error) = crate::corex::dump_pid(
         request.pid,
         &paths.final_path,
         output,
         request.cancellation.as_ref(),
-    )
-    .map_err(|error| DumpError::Corex(error.to_string()))?;
+    ) {
+        remove_if_present(&paths.final_path);
+        return Err(DumpError::Corex(error.to_string()));
+    }
     if !paths.final_path.is_file() {
         return Err(DumpError::Corex(format!(
             "corex reported success but did not create {}",
@@ -195,6 +191,22 @@ fn write_corex_dump(request: &DumpRequest) -> Result<PathBuf, DumpError> {
         )));
     }
     Ok(paths.final_path.clone())
+}
+
+#[cfg(target_os = "linux")]
+fn verify_external_dump(path: PathBuf) -> Result<PathBuf, DumpError> {
+    let valid = fs::symlink_metadata(&path)
+        .map(|metadata| metadata.file_type().is_file() && metadata.len() > 0)
+        .unwrap_or(false);
+    if valid {
+        Ok(path)
+    } else {
+        remove_if_present(&path);
+        Err(DumpError::DotNet(format!(
+            ".NET runtime reported success but did not create a non-empty dump at {}",
+            path.display()
+        )))
+    }
 }
 
 impl DumpBackend for GcoreBackend {
@@ -704,6 +716,44 @@ mod tests {
 
         assert!(matches!(error, DumpError::AlreadyExists(value) if value == path));
         assert_eq!(fs::read(&path).unwrap(), b"existing");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    #[test]
+    fn failed_corex_dump_removes_partial_output() {
+        let root =
+            std::env::temp_dir().join(format!("procdump-corex-cleanup-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut request = request(OutputSpec {
+            directory: root.clone(),
+            file_name: Some(OsString::from("failed.core")),
+        });
+        request.pid = i32::MAX;
+        let output = root.join(format!("failed.core.{}", request.pid));
+
+        assert!(write_corex_dump(&request).is_err());
+        assert!(!output.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn empty_external_dump_reservation_is_removed() {
+        let root =
+            std::env::temp_dir().join(format!("procdump-dotnet-cleanup-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir(&root).unwrap();
+        let output = root.join("empty.core");
+        fs::write(&output, []).unwrap();
+
+        assert!(verify_external_dump(output.clone()).is_err());
+        assert!(!output.exists());
         fs::remove_dir_all(root).unwrap();
     }
 

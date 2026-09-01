@@ -56,19 +56,6 @@ This produces:
 * `target/release/libprocdump.a`
 * Public C header: `crates/procdump-capi/include/ProcDumpLib.h`
 
-The safe Rust API is packaged independently for the internal Azure Artifacts
-Cargo feed. Verify the exact source archive before release, then publish from a
-clean, authenticated release checkout:
-
-```bash
-cargo xtask verify-rust-package
-cargo xtask publish-rust-package
-```
-
-The publish command targets `Tools_PublicPackages`; authentication is provided
-by the Azure Artifacts Cargo credential provider and is never stored in the
-repository.
-
 ## Rust API features
 
 The `procdump` package builds immediate dump generation by default. Optional

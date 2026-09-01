@@ -1,8 +1,6 @@
 # ProcDump Rust API
 
-This package provides the supported Rust API for ProcDump. It is published to
-the internal `Tools_PublicPackages` Azure Artifacts Cargo feed and is not
-published to crates.io.
+This package provides the supported Rust API for ProcDump.
 
 The default feature set supports immediate native and .NET dump generation.
 Additional capabilities are additive:

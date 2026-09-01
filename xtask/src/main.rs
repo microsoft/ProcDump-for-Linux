@@ -561,4 +561,27 @@ mod tests {
             [OsStr::new("../../../procdump")]
         );
     }
+
+    #[test]
+    fn scenarios_use_valid_directory_stack_commands() {
+        let scenarios = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("tests/integration/scenarios");
+
+        for entry in fs::read_dir(scenarios).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension() != Some(OsStr::new("sh")) {
+                continue;
+            }
+            let contents = fs::read_to_string(&path).unwrap();
+            assert!(
+                !contents
+                    .lines()
+                    .any(|line| matches!(line.trim(), "pushds" | "popds")),
+                "invalid directory-stack command in {}",
+                path.display()
+            );
+        }
+    }
 }

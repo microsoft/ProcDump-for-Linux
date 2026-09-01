@@ -47,10 +47,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 * `tests/integration`: unchanged compatibility scenarios and native test fixtures
 * `xtask`: Cargo staging and integration-test runner
 
-The `procdump` crate is also packaged as source for the internal
-`Tools_PublicPackages` Azure Artifacts Cargo feed. Its default feature set
-supports immediate dump generation; monitoring, .NET triggers, and restrack are
-additive features, while the CLI enables `full`.
+The `procdump` crate's default feature set supports immediate dump generation;
+monitoring, .NET triggers, and restrack are additive features, while the CLI
+enables `full`.
 
 ## Usage
 **BREAKING CHANGE** With the release of ProcDump 1.3 the switches are now aligned with the Windows ProcDump version.
