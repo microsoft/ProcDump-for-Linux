@@ -36,6 +36,11 @@ int WaitForSingleObject(struct Handle *Handle, int Milliseconds)
         clock_gettime(CLOCK_REALTIME, &ts);
         ts.tv_sec += Milliseconds / 1000;              // ms->sec
         ts.tv_nsec += (Milliseconds % 1000) * 1000000; // remaining ms->ns
+        if (ts.tv_nsec >= 1000000000)
+        {
+            ts.tv_sec += ts.tv_nsec / 1000000000;
+            ts.tv_nsec %= 1000000000;
+        }
     }
 
     switch (Handle->type) {
@@ -65,12 +70,28 @@ int WaitForSingleObject(struct Handle *Handle, int Milliseconds)
     case SEMAPHORE:
         if(Milliseconds == INFINITE_WAIT)
         {
-            sem_wait(Handle->semaphore);
+            do
+            {
+                rc = sem_wait(Handle->semaphore);
+            } while(rc == -1 && errno == EINTR);
+
+            if(rc != 0)
+            {
+                rc = errno;
+            }
         }
         else
         {
-#ifdef __linux__            
-            sem_timedwait(Handle->semaphore, &ts);
+#ifdef __linux__
+            do
+            {
+                rc = sem_timedwait(Handle->semaphore, &ts);
+            } while(rc == -1 && errno == EINTR);
+
+            if(rc != 0)
+            {
+                rc = errno;
+            }
 #elif __APPLE__
             struct timespec now, sleep_time;    
             while(1)
@@ -86,6 +107,7 @@ int WaitForSingleObject(struct Handle *Handle, int Milliseconds)
                 if ((now.tv_sec > ts.tv_sec) ||
                     (now.tv_sec == ts.tv_sec && now.tv_nsec >= ts.tv_nsec)) 
                 {
+                    rc = ETIMEDOUT;
                     break;
                 }
 
@@ -118,19 +140,26 @@ struct coordinator {
     pthread_mutex_t mutexEventTriggered;
     struct thread_result *results;
     int numberTriggered; // behind mutex
-    int nWaiters; // when 0, delete the struct
     int stopIssued; // when != 0, proceed to cleanup
-    struct Handle evtCanCleanUp; // trigger when we leave main wait thread
     struct Handle evtStartWaiting;
 };
 
 struct thread_args {
     struct Handle *handle;
-    struct coordinator *coordinator; // for cleanup
-    int milliseconds;
+    struct coordinator *coordinator;
     int retVal;
     int threadIndex;
 };
+
+static const int MULTIPLE_WAIT_POLL_INTERVAL_MILLISECONDS = 1000;
+
+static bool IsStopIssued(struct coordinator *coordinator)
+{
+    pthread_mutex_lock(&coordinator->mutexEventTriggered);
+    bool stopIssued = coordinator->stopIssued != 0;
+    pthread_mutex_unlock(&coordinator->mutexEventTriggered);
+    return stopIssued;
+}
 
 void *WaiterThread(void *thread_args)
 {
@@ -142,14 +171,15 @@ void *WaiterThread(void *thread_args)
         // we messed up and the thread can't start...
     }
 
-    // wait on the event, and then let parent know if we signal
-    if (input->milliseconds == INFINITE_WAIT) {
-        do {
-            rc = WaitForSingleObject(input->handle, 5000); // loop every 5 seconds to make sure we can get out and cleanup if we don't need to wait anymore
-        } while (!input->coordinator->stopIssued && rc == ETIMEDOUT);
-    } else {
-        rc = WaitForSingleObject(input->handle, input->milliseconds); // blocks till timeout, error, or success
-    }
+    // Poll in bounded intervals so a losing waiter can observe the stop request.
+    do {
+        if (IsStopIssued(input->coordinator)) {
+            rc = ETIMEDOUT;
+            break;
+        }
+
+        rc = WaitForSingleObject(input->handle, MULTIPLE_WAIT_POLL_INTERVAL_MILLISECONDS);
+    } while (rc == ETIMEDOUT);
 
 
     pthread_mutex_lock(&input->coordinator->mutexEventTriggered);
@@ -158,28 +188,8 @@ void *WaiterThread(void *thread_args)
     pthread_mutex_unlock(&input->coordinator->mutexEventTriggered);
     pthread_cond_signal(&input->coordinator->condEventTriggered);
 
-    // Wait for the cleanup signal!
-    WaitForSingleObject(&input->coordinator->evtCanCleanUp, INFINITE_WAIT);
-
-    // Lock mutex to make sure each thread gets a chance to check status
-    pthread_mutex_lock(&input->coordinator->mutexEventTriggered);
-    input->coordinator->nWaiters--;
-
-    if (input->coordinator->nWaiters == 0) { // if we're the last one, turn the lights out
-        pthread_mutex_unlock(&input->coordinator->mutexEventTriggered);
-        pthread_mutex_destroy(&input->coordinator->mutexEventTriggered);
-        pthread_cond_destroy(&input->coordinator->condEventTriggered);
-        free(input->coordinator->results);
-        free(input->coordinator);
-        free(input);
-
-    } else { // otherwise only clean up your own memory
-        pthread_mutex_unlock(&input->coordinator->mutexEventTriggered);
-        free(input);
-
-    }
-
-    pthread_exit(NULL);
+    free(input);
+    return NULL;
 }
 
 //--------------------------------------------------------------------
@@ -240,9 +250,7 @@ int WaitForMultipleObjects(int Count, struct Handle **Handles, bool WaitAll, int
     coordinator->numberTriggered = 0;
     coordinator->stopIssued = 0;
 
-    coordinator->evtCanCleanUp.type = EVENT;
     coordinator->evtStartWaiting.type = EVENT;
-    InitNamedEvent(&(coordinator->evtCanCleanUp.event), true, false, const_cast<char*> ("CanCleanUp"));
     InitNamedEvent(&(coordinator->evtStartWaiting.event), true, false, const_cast<char*> ("StartWaiting"));
     pthread_cond_init(&coordinator->condEventTriggered, NULL);
     pthread_mutex_init(&coordinator->mutexEventTriggered, NULL);
@@ -265,7 +273,6 @@ int WaitForMultipleObjects(int Count, struct Handle **Handles, bool WaitAll, int
             exit(-1);
         }
         thread_args[t]->handle = Handles[t];
-        thread_args[t]->milliseconds = (Milliseconds == INFINITE_WAIT) ? Milliseconds : Milliseconds + 100; // prevent race condition of everyone timing out at the same time as the main waiter thread
         thread_args[t]->threadIndex = t;
         thread_args[t]->coordinator = coordinator;
         rc = pthread_create(&threads[t], NULL, WaiterThread, (void *)thread_args[t]);
@@ -276,7 +283,6 @@ int WaitForMultipleObjects(int Count, struct Handle **Handles, bool WaitAll, int
         }
     }
 
-    coordinator->nWaiters = Count;
     SetEvent(&(coordinator->evtStartWaiting.event));
 
     // listen to our threads in no particular order
@@ -299,16 +305,15 @@ int WaitForMultipleObjects(int Count, struct Handle **Handles, bool WaitAll, int
     coordinator->stopIssued = 1;
     pthread_mutex_unlock(&coordinator->mutexEventTriggered);
 
-    // cleanup threads
+    // Wait until no worker can access the caller-owned handles or coordinator.
     for (t = 0; t < Count; t++) {
-        pthread_detach(threads[t]);
+        int joinRc = pthread_join(threads[t], NULL);
+        if (joinRc != 0) {
+            Log(error, INTERNAL_ERROR);
+            Trace("ERROR: pthread_join failed in %s with error %d\n",__FILE__,joinRc);
+            exit(-1);
+        }
     }
-
-    // free everything!
-    SetEvent(&(coordinator->evtCanCleanUp.event));
-
-    free(threads); // we don't need handles on those threads anymore
-    free(thread_args); // each thread has already got their copy and is in charge of freeing it
 
     // rc will be non-zero if we timed/errored out
     // retVal will be <wait code> + threadIndex that fired first (e.g., WAIT_OBJECT_0 + 1, WAIT_ABANDONED + 2)
@@ -318,13 +323,13 @@ int WaitForMultipleObjects(int Count, struct Handle **Handles, bool WaitAll, int
         retVal = (WaitAll) ? rc : results[0].retVal + results[0].threadIndex;
     }
 
-#ifndef __clang__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wanalyzer-malloc-leak"
-    // Analyzer false positive: 'coordinator' is freed on a different thread.
+    DestroyEvent(&(coordinator->evtStartWaiting.event));
+    pthread_cond_destroy(&coordinator->condEventTriggered);
+    pthread_mutex_destroy(&coordinator->mutexEventTriggered);
+    free(results);
+    free(coordinator);
+    free(threads);
+    free(thread_args);
+
     return retVal;
-#pragma GCC diagnostic pop
-#else
-    return retVal;
-#endif
 }

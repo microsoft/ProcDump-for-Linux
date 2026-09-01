@@ -347,6 +347,19 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
 
   add_dependencies(ProcDumpLibTestDriver procdumplib)
   target_link_libraries(ProcDumpLibTestDriver procdumplib)
+
+  add_executable(WaitForMultipleObjectsCleanupTest
+                 ${procdump_Test}/WaitForMultipleObjectsCleanupTest.cpp
+                )
+
+  target_compile_options(WaitForMultipleObjectsCleanupTest PRIVATE -g -pthread -fstack-protector-all -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -Werror -D_GNU_SOURCE -std=c++11 -O2)
+
+  target_include_directories(WaitForMultipleObjectsCleanupTest PUBLIC
+                             ${procdump_INC}
+                            )
+
+  add_dependencies(WaitForMultipleObjectsCleanupTest procdumplib)
+  target_link_libraries(WaitForMultipleObjectsCleanupTest procdumplib)
 endif()
 
 #
