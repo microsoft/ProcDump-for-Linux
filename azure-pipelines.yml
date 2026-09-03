@@ -65,10 +65,8 @@ extends:
 
           - template: templates/build.yaml@ProcDump
 
-          - script: |
-              cd procdump_build/tests/integration
-              ./run.sh
-            displayName: 'Run unit tests'
+          - script: cargo xtask test-integration
+            displayName: 'Run integration tests'
 
         - job: "ProcDump_Build_AMD64_Run_Tests"
           pool:
@@ -100,9 +98,8 @@ extends:
           - script: |
               apt install -y iproute2
               echo "Check port 5032" && ss -tulnp | grep 5032
-              cd procdump_build/tests/integration
-              ./run.sh
-            displayName: 'Run unit tests'
+              cargo xtask test-integration
+            displayName: 'Run integration tests'
 
         - job: "ProcDump_Build_MACOS_Run_Tests"
           pool:
@@ -120,7 +117,5 @@ extends:
 
           - template: templates/build.yaml@ProcDump
 
-          - script: |
-              cd procdump_build/tests/integration
-              sudo ./run.sh
-            displayName: 'Run unit tests'
+          - script: cargo xtask test-integration
+            displayName: 'Run integration tests'
