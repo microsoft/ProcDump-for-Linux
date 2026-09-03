@@ -92,7 +92,7 @@ fn build_ebpf(manifest: &Path, out_dir: &Path, target: &str) {
     let ebpf = manifest.join("native/ebpf");
     println!("cargo:rerun-if-changed={}", ebpf.display());
     let (target_arch, multiarch_include) = if target.starts_with("x86_64") {
-        ("-D__TARGET_ARCH_x86", "/usr/x86_64-linux-gnu/include")
+        ("-D__TARGET_ARCH_x86", "/usr/include/x86_64-linux-gnu")
     } else if target.starts_with("aarch64") {
         ("-D__TARGET_ARCH_arm64", "/usr/include/aarch64-linux-gnu")
     } else {

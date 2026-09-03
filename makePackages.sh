@@ -50,7 +50,11 @@ build_deb() {
 
     package_version="$PACKAGE_VERSION-$PACKAGE_RELEASE"
     package_root="$PACKAGES_DIR/deb/${PACKAGE_NAME}_${package_version}_${ARCHITECTURE}"
-    package_file="$PACKAGES_DIR/${PACKAGE_NAME}_${package_version}_${ARCHITECTURE}.deb"
+    if [ "$PACKAGE_RELEASE" = "0" ]; then
+        package_file="$PACKAGES_DIR/${PACKAGE_NAME}_${PACKAGE_VERSION}_${ARCHITECTURE}.deb"
+    else
+        package_file="$PACKAGES_DIR/${PACKAGE_NAME}_${package_version}_${ARCHITECTURE}.deb"
+    fi
     rm -rf "$package_root"
     mkdir -p \
         "$package_root/DEBIAN" \

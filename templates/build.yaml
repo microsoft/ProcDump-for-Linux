@@ -1,0 +1,38 @@
+parameters:
+  - name: srcPath
+    type: string
+    default: '.'
+  - name: runStaticAnalysis
+    type: boolean
+    default: false
+  - name: builddir
+    type: string
+    default: 'target'
+  - name: ldpath
+    type: string
+    default: ''
+
+steps:
+  - script: |
+      set -e
+      cd '${{ parameters.srcPath }}'
+      export CARGO_TARGET_DIR='${{ parameters.builddir }}'
+      if [ -n "${TOOLVERSION:-}" ]; then
+        export PROCDUMP_VERSION="$TOOLVERSION"
+      fi
+      if [ -n '${{ parameters.ldpath }}' ]; then
+        export LD_LIBRARY_PATH='${{ parameters.ldpath }}'
+      fi
+      cargo build --locked --release --bin procdump
+      cargo build --locked --release -p procdump-capi
+    displayName: 'Build ProcDump release artifacts'
+
+  - ${{ if eq(parameters.runStaticAnalysis, true) }}:
+    - script: |
+        set -e
+        cd '${{ parameters.srcPath }}'
+        export CARGO_TARGET_DIR='${{ parameters.builddir }}'
+        cargo fmt --all --check
+        cargo clippy --workspace --all-targets -- -D warnings
+        cargo test --workspace --locked
+      displayName: 'Run Rust validation'
