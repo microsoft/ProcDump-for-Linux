@@ -9,6 +9,7 @@ dumpDir=$(mktemp -d -t dump_XXXXXX)
 # uses 'cat' as target for restrack (same as restrack_trigger.sh)
 cat /dev/urandom > /dev/null &
 target_pid=$!
+trap 'kill -9 "$target_pid" 2>/dev/null || true' EXIT
 
 # -restrack with -sr 1 (sample every allocation)
 echo "[`date +"%T.%3N"`] $PROCDUMPPATH -restrack -sr 1 $target_pid $dumpDir"

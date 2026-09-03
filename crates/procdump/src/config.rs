@@ -1,5 +1,5 @@
 use std::ffi::{OsStr, OsString};
-use std::fmt;
+use std::fmt::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_DUMP_COUNT: u32 = 1;
@@ -8,6 +8,12 @@ pub const DEFAULT_SAMPLE_RATE: u32 = 1;
 pub const DEFAULT_THRESHOLD_SECONDS: u64 = 10;
 pub const MAX_DUMP_COUNT: u32 = 100;
 pub const MAX_PERF_COUNTER_TRIGGERS: usize = 5;
+
+const LEGACY_SHARED_OPTION_NAMES: &[&str] = &[
+    "?", "c", "cl", "e", "f", "fc", "fx", "gcgen", "gcm", "log", "m", "mc", "ml", "n", "o", "pc",
+    "pcl", "pf", "pgid", "restrack", "s", "sig", "sr", "tc", "w",
+];
+const LEGACY_DASH_ONLY_OPTION_NAMES: &[&str] = &["usegcore"];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Platform {
@@ -186,12 +192,200 @@ impl Config {
     }
 
     pub fn requires_gcore_preflight(&self) -> bool {
-        self.dotnet_trigger.is_none()
+        let generates_primary_dump = self.dotnet_trigger.is_none()
             && self.perf_counters.is_empty()
             && !self
                 .restrack
                 .as_ref()
-                .is_some_and(|restrack| !restrack.generate_dump)
+                .is_some_and(|restrack| !restrack.generate_dump);
+        let native_core_writer_available = cfg!(all(
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        ));
+
+        generates_primary_dump && (self.use_gcore || !native_core_writer_available)
+    }
+
+    pub(crate) fn legacy_summary(
+        &self,
+        platform: Platform,
+        process: Option<(&OsStr, i32)>,
+    ) -> String {
+        let mut output = String::new();
+        if !self.signals.is_empty() {
+            output.push_str(
+                "** NOTE ** Signal triggers use PTRACE which will impact the performance of the target process\n\n",
+            );
+        }
+
+        match &self.target {
+            TargetSpec::ProcessGroup(group) => summary_line(&mut output, "Process Group:", group),
+            TargetSpec::Name(name) if self.wait_for_process => {
+                summary_line(&mut output, "Process Name:", &name.to_string_lossy())
+            }
+            _ => {
+                let (name, pid) = process.unwrap_or_else(|| match &self.target {
+                    TargetSpec::Pid(pid) => (OsStr::new("n/a"), *pid),
+                    TargetSpec::Name(name) => (name.as_os_str(), 0),
+                    TargetSpec::ProcessGroup(group) => (OsStr::new("n/a"), *group),
+                });
+                summary_line(
+                    &mut output,
+                    "Process:",
+                    &format!("{} ({pid})", name.to_string_lossy()),
+                );
+            }
+        }
+
+        match self.cpu {
+            Some(Threshold::Below(value)) => {
+                summary_line(&mut output, "CPU Threshold:", &format!("< {value}%"))
+            }
+            Some(Threshold::AtLeast(value)) => {
+                summary_line(&mut output, "CPU Threshold:", &format!(">= {value}%"))
+            }
+            None => summary_line(&mut output, "CPU Threshold:", &"n/a"),
+        }
+
+        let memory = match (&self.memory_mb, &self.dotnet_trigger) {
+            (Some(Threshold::Below(values)), _) => {
+                Some(("Commit Threshold:", "<", values.as_slice()))
+            }
+            (Some(Threshold::AtLeast(values)), _) => {
+                Some(("Commit Threshold:", ">=", values.as_slice()))
+            }
+            (_, Some(DotNetTrigger::GcMemory { thresholds_mb, .. })) => {
+                Some((".NET Memory Threshold:", ">=", thresholds_mb.as_slice()))
+            }
+            _ => None,
+        };
+        if let Some((label, comparison, values)) = memory {
+            let values = values
+                .iter()
+                .map(|value| format!("{value} MB"))
+                .collect::<Vec<_>>()
+                .join(",");
+            summary_line(&mut output, label, &format!("{comparison} {values}"));
+        } else {
+            summary_line(&mut output, "Commit Threshold:", &"n/a");
+        }
+
+        summary_line(
+            &mut output,
+            "Thread Threshold:",
+            &self
+                .thread_count
+                .map_or_else(|| "n/a".into(), |value| value.to_string()),
+        );
+        summary_line(
+            &mut output,
+            "File Descriptor Threshold:",
+            &self
+                .file_descriptor_count
+                .map_or_else(|| "n/a".into(), |value| value.to_string()),
+        );
+
+        if platform == Platform::Linux {
+            match &self.dotnet_trigger {
+                Some(DotNetTrigger::GcMemory { heap, .. }) => {
+                    let heap = match heap {
+                        GcHeap::Cumulative => "Cumulative".into(),
+                        GcHeap::Generation(value) => value.to_string(),
+                        GcHeap::LargeObject => "LOH".into(),
+                        GcHeap::PinnedObject => "POH".into(),
+                    };
+                    summary_line(&mut output, "GC Generation/heap:", &heap);
+                }
+                Some(DotNetTrigger::GcGeneration(value)) => {
+                    summary_line(&mut output, "GC Generation/heap:", value)
+                }
+                _ => summary_line(&mut output, "GC Generation:", &"n/a"),
+            }
+            if let Some(restrack) = &self.restrack {
+                summary_line(&mut output, "Resource tracking:", &"On");
+                summary_line(
+                    &mut output,
+                    "Resource tracking sample rate:",
+                    &restrack.sample_rate,
+                );
+            } else {
+                summary_line(&mut output, "Resource tracking:", &"n/a");
+                summary_line(&mut output, "Resource tracking sample rate:", &"n/a");
+            }
+            if self.signals.is_empty() {
+                summary_line(&mut output, "Signal:", &"n/a");
+            } else {
+                summary_line(
+                    &mut output,
+                    "Signal(s):",
+                    &self
+                        .signals
+                        .iter()
+                        .map(i32::to_string)
+                        .collect::<Vec<_>>()
+                        .join(","),
+                );
+            }
+            if self.dotnet_trigger == Some(DotNetTrigger::Exception) {
+                summary_line(&mut output, "Exception monitor:", &"On");
+                summary_line(
+                    &mut output,
+                    "Exception filter:",
+                    &self
+                        .exception_filter
+                        .as_ref()
+                        .map_or_else(|| "n/a".into(), |value| value.to_string_lossy()),
+                );
+            } else {
+                summary_line(&mut output, "Exception monitor:", &"n/a");
+            }
+            for trigger in &self.perf_counters {
+                let percentile = trigger
+                    .percentile
+                    .map(|value| format!("[p{}]", (value * 100.0 + 0.5) as i32))
+                    .unwrap_or_default();
+                summary_line(
+                    &mut output,
+                    "Perf Counter Trigger:",
+                    &format!(
+                        "{}:{}{} {} {:.2}",
+                        trigger.provider,
+                        trigger.counter,
+                        percentile,
+                        if trigger.below { "<" } else { ">=" },
+                        trigger.threshold
+                    ),
+                );
+            }
+            if let Some(filter) = self
+                .restrack
+                .as_ref()
+                .and_then(|restrack| restrack.exclude_filter.as_ref())
+            {
+                summary_line(&mut output, "Exclude filter:", &filter.to_string_lossy());
+            }
+        }
+
+        summary_line(
+            &mut output,
+            "Polling Interval (ms):",
+            &self.polling_interval_ms,
+        );
+        summary_line(&mut output, "Threshold (s):", &self.threshold_seconds);
+        summary_line(&mut output, "Number of Dumps:", &self.dump_count);
+        summary_line(
+            &mut output,
+            "Output directory:",
+            &self.output.directory.display(),
+        );
+        if let Some(name) = &self.output.file_name {
+            summary_line(
+                &mut output,
+                "Custom name for core dumps:",
+                &format!("{}_<counter>", name.to_string_lossy()),
+            );
+        }
+        output
     }
 
     fn validate(&self) -> Result<(), ParseError> {
@@ -275,6 +469,10 @@ impl Config {
         }
         Ok(())
     }
+}
+
+fn summary_line(output: &mut String, label: &str, value: &impl fmt::Display) {
+    writeln!(output, "{label:<40}{value}").expect("writing to a String cannot fail");
 }
 
 pub struct ConfigBuilder {
@@ -418,6 +616,106 @@ impl fmt::Display for ParseError {
 }
 
 impl std::error::Error for ParseError {}
+
+impl ParseError {
+    pub fn legacy_cli_message(&self) -> Option<String> {
+        match self {
+            Self::InvalidOutputDirectory(path) => Some(format!(
+                "Invalid directory (\"{}\") provided for core dump output.",
+                path.display()
+            )),
+            Self::InvalidValue { option, value } => match option.as_str() {
+                "c" | "cl" if is_negative_number(value) => {
+                    Some("Invalid CPU threshold count specified.".into())
+                }
+                "m" | "ml" if contains_negative_number(value) => {
+                    Some("Invalid memory threshold specified.".into())
+                }
+                "gcm" => Some("Invalid GC generation or heap specified.".into()),
+                "gcgen" => Some("Invalid GC generation specified.".into()),
+                "sr" => Some("Invalid sample rate specified.".into()),
+                "sig" => Some("Invalid signal specified.".into()),
+                "mc" => Some("Invalid core dump mask specified.".into()),
+                "tc" if is_negative_number(value) => {
+                    Some("Invalid thread threshold count specified.".into())
+                }
+                "fc" if is_negative_number(value) => {
+                    Some("Invalid file descriptor threshold count specified.".into())
+                }
+                "pf" if is_negative_number(value) || value == "0" => {
+                    Some("Invalid polling inverval specified.".into())
+                }
+                "s" if is_negative_number(value) => Some("Invalid seconds specified.".into()),
+                "n" if is_negative_number(value) || value == "0" => {
+                    Some("Invalid number of dumps specified.".into())
+                }
+                "log" => Some("Invalid diagnostics stream specified.".into()),
+                _ => None,
+            },
+            Self::InvalidCombination(message) => match message.as_str() {
+                "-n is invalid when multiple memory thresholds are specified" => Some(
+                    "When specifying more than one memory threshold the number of dumps switch (-n) is invalid."
+                        .into(),
+                ),
+                "-f requires the -e exception trigger" => Some(
+                    "Please use the -e switch when specifying an exception filter (-f)".into(),
+                ),
+                "-sr requires resource tracking" => Some(
+                    "Please use the -restrack switch when specifying a sample rate (-samplerate)"
+                        .into(),
+                ),
+                "-fx requires resource tracking" => Some(
+                    "Please use the -restrack switch when specifying an exclude filter (-fx)"
+                        .into(),
+                ),
+                "the wait option requires the process be specified by name"
+                | "the wait option requires a process name" => {
+                    Some("The wait option requires the process be specified by name.".into())
+                }
+                "signal and exception triggers must be the only trigger specified" => {
+                    Some("Signal/Exception trigger must be the only trigger specified.".into())
+                }
+                "the polling interval is invalid during signal or exception monitoring" => Some(
+                    "Polling interval has no meaning during Signal/Exception monitoring.".into(),
+                ),
+                "a custom dump name is invalid when monitoring multiple processes" => Some(
+                    "Setting core dump name in multi process monitoring is invalid (path is ok)."
+                        .into(),
+                ),
+                "dump count must be between 1 and 100" => {
+                    Some("Invalid number of dumps specified.".into())
+                }
+                "polling interval must be greater than zero" => {
+                    Some("Invalid polling inverval specified.".into())
+                }
+                "signals must be catchable values between 1 and 64" => {
+                    Some("Invalid signal specified.".into())
+                }
+                _ => None,
+            },
+            Self::HelpRequested
+            | Self::MissingTarget
+            | Self::MissingValue(_)
+            | Self::DuplicateOption(_)
+            | Self::UnsupportedOption(_)
+            | Self::TooManyPositionals => None,
+        }
+    }
+}
+
+fn is_negative_number(value: &OsStr) -> bool {
+    value
+        .to_str()
+        .is_some_and(|value| value.starts_with('-') && value[1..].parse::<u64>().is_ok())
+}
+
+fn contains_negative_number(value: &OsStr) -> bool {
+    value.to_str().is_some_and(|value| {
+        value
+            .split(',')
+            .any(|item| item.parse::<i64>().is_ok_and(|item| item < 0))
+    })
+}
 
 pub fn parse<I, S>(arguments: I, platform: Platform) -> Result<Config, ParseError>
 where
@@ -809,33 +1107,8 @@ fn normalize_option(argument: &OsStr) -> Option<String> {
         return None;
     }
     let option = option.to_ascii_lowercase();
-    let recognized = matches!(
-        option.as_str(),
-        "?" | "c"
-            | "cl"
-            | "m"
-            | "ml"
-            | "gcm"
-            | "gcgen"
-            | "restrack"
-            | "sr"
-            | "sig"
-            | "mc"
-            | "pc"
-            | "pcl"
-            | "tc"
-            | "fc"
-            | "pf"
-            | "n"
-            | "s"
-            | "log"
-            | "e"
-            | "f"
-            | "fx"
-            | "o"
-            | "w"
-            | "pgid"
-    ) || (prefix == '-' && option == "usegcore");
+    let recognized = LEGACY_SHARED_OPTION_NAMES.contains(&option.as_str())
+        || (prefix == '-' && LEGACY_DASH_ONLY_OPTION_NAMES.contains(&option.as_str()));
 
     recognized.then_some(option)
 }
@@ -1068,11 +1341,257 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     fn parse_test(arguments: &[&str], platform: Platform) -> Result<Config, ParseError> {
         parse_with_directory_check(arguments.iter().copied(), platform, |path| {
             matches!(path.to_str(), Some(".") | Some("/tmp") | Some("/tmp/dumps"))
         })
+    }
+
+    #[test]
+    fn accepted_switch_spellings_match_legacy_character_for_character() {
+        let expected: BTreeSet<_> = include_str!("../../../tests/cli-compat/legacy-switches.txt")
+            .lines()
+            .collect();
+        let actual: BTreeSet<String> = LEGACY_SHARED_OPTION_NAMES
+            .iter()
+            .flat_map(|option| [format!("-{option}"), format!("/{option}")])
+            .chain(
+                LEGACY_DASH_ONLY_OPTION_NAMES
+                    .iter()
+                    .map(|option| format!("-{option}")),
+            )
+            .collect();
+
+        assert_eq!(
+            actual.iter().map(String::as_str).collect::<BTreeSet<_>>(),
+            expected
+        );
+        for spelling in &actual {
+            assert!(normalize_option(OsStr::new(spelling)).is_some());
+            assert!(normalize_option(OsStr::new(&spelling.to_ascii_uppercase())).is_some());
+        }
+        assert_eq!(normalize_option(OsStr::new("/usegcore")), None);
+    }
+
+    #[test]
+    fn every_legacy_switch_spelling_matches_legacy_character_for_character() {
+        for spelling in include_str!("../../../tests/cli-compat/legacy-switches.txt").lines() {
+            for spelling in [spelling.to_owned(), spelling.to_ascii_uppercase()] {
+                let option = spelling.trim_start_matches(['-', '/']).to_ascii_lowercase();
+                if option == "?" {
+                    assert_eq!(
+                        parse_test(&[&spelling], Platform::Linux),
+                        Err(ParseError::HelpRequested)
+                    );
+                    continue;
+                }
+
+                let arguments = valid_arguments_for_switch(&spelling, &option);
+                assert!(
+                    parse_test(&arguments, Platform::Linux).is_ok(),
+                    "legacy switch {spelling} was rejected: {:?}",
+                    parse_test(&arguments, Platform::Linux)
+                );
+            }
+        }
+    }
+
+    fn valid_arguments_for_switch<'a>(spelling: &'a str, option: &str) -> Vec<&'a str> {
+        match option {
+            "c" | "cl" | "m" | "ml" | "tc" | "fc" | "pf" | "n" | "s" => {
+                vec![spelling, "1", "42"]
+            }
+            "gcm" => vec![spelling, "10", "42"],
+            "gcgen" => vec![spelling, "1", "42"],
+            "restrack" | "e" | "o" | "usegcore" => vec![spelling, "42"],
+            "sr" => vec!["-restrack", spelling, "1", "42"],
+            "sig" => vec![spelling, "10", "42"],
+            "mc" => vec![spelling, "0x7f", "42"],
+            "pc" | "pcl" => vec![spelling, "Provider:Counter", "1", "42"],
+            "log" => vec![spelling, "stdout", "42"],
+            "f" => vec![spelling, "System.Exception", "-e", "42"],
+            "fx" => vec!["-restrack", spelling, "malloc", "42"],
+            "w" => vec![spelling, "worker"],
+            "pgid" => vec![spelling, "42"],
+            _ => panic!("missing compatibility arguments for {spelling}"),
+        }
+    }
+
+    #[test]
+    fn default_summary_matches_legacy_character_for_character() {
+        let config = parse_test(&["42"], Platform::Linux).unwrap();
+        let expected = include_str!("../../../tests/cli-compat/legacy-linux-default-summary.txt")
+            .replace("@EOL@", "\n");
+
+        assert_eq!(
+            config.legacy_summary(Platform::Linux, Some((OsStr::new("worker"), 42))),
+            expected
+        );
+    }
+
+    #[cfg(all(feature = "dotnet-triggers", feature = "restrack"))]
+    #[test]
+    fn advanced_summary_matches_legacy_character_for_character() {
+        let config = parse_test(
+            &[
+                "-c",
+                "65",
+                "-m",
+                "100,200",
+                "-tc",
+                "25",
+                "-fc",
+                "100",
+                "-restrack",
+                "-sr",
+                "10",
+                "-pc",
+                "Provider:Counter[p95]",
+                "1.25",
+                "-fx",
+                "malloc",
+                "42",
+                "/tmp/dump.core",
+            ],
+            Platform::Linux,
+        )
+        .unwrap();
+        let expected = include_str!("../../../tests/cli-compat/legacy-linux-advanced-summary.txt")
+            .replace("@EOL@", "\n");
+
+        assert_eq!(
+            config.legacy_summary(Platform::Linux, Some((OsStr::new("worker"), 42))),
+            expected
+        );
+    }
+
+    #[cfg(feature = "dotnet-triggers")]
+    #[test]
+    fn exception_summary_matches_legacy_character_for_character() {
+        let config = parse_test(
+            &["-e", "-f", "System.Exception", "-w", "worker", "/tmp"],
+            Platform::Linux,
+        )
+        .unwrap();
+        let expected = include_str!("../../../tests/cli-compat/legacy-linux-exception-summary.txt")
+            .replace("@EOL@", "\n");
+
+        assert_eq!(config.legacy_summary(Platform::Linux, None), expected);
+    }
+
+    #[test]
+    fn signal_summary_matches_legacy_character_for_character() {
+        let config = parse_test(&["-sig", "10,12", "42", "/tmp"], Platform::Linux).unwrap();
+        let expected = include_str!("../../../tests/cli-compat/legacy-linux-signal-summary.txt")
+            .replace("@EOL@", "\n");
+
+        assert_eq!(
+            config.legacy_summary(Platform::Linux, Some((OsStr::new("worker"), 42))),
+            expected
+        );
+    }
+
+    #[test]
+    fn macos_summary_matches_legacy_character_for_character() {
+        let config = parse_test(&["42"], Platform::MacOs).unwrap();
+        let expected = include_str!("../../../tests/cli-compat/legacy-macos-default-summary.txt")
+            .replace("@EOL@", "\n");
+
+        assert_eq!(
+            config.legacy_summary(Platform::MacOs, Some((OsStr::new("worker"), 42))),
+            expected
+        );
+    }
+
+    #[test]
+    fn parser_error_messages_match_legacy_character_for_character() {
+        let errors = [
+            ParseError::InvalidValue {
+                option: "c".into(),
+                value: "-1".into(),
+            },
+            ParseError::InvalidValue {
+                option: "m".into(),
+                value: "1,-1".into(),
+            },
+            ParseError::InvalidValue {
+                option: "gcm".into(),
+                value: "bad".into(),
+            },
+            ParseError::InvalidValue {
+                option: "gcgen".into(),
+                value: "3".into(),
+            },
+            ParseError::InvalidValue {
+                option: "sr".into(),
+                value: "-1".into(),
+            },
+            ParseError::InvalidValue {
+                option: "sig".into(),
+                value: "-1".into(),
+            },
+            ParseError::InvalidValue {
+                option: "mc".into(),
+                value: "-1".into(),
+            },
+            ParseError::InvalidValue {
+                option: "tc".into(),
+                value: "-1".into(),
+            },
+            ParseError::InvalidValue {
+                option: "fc".into(),
+                value: "-1".into(),
+            },
+            ParseError::InvalidValue {
+                option: "pf".into(),
+                value: "-1".into(),
+            },
+            ParseError::InvalidValue {
+                option: "s".into(),
+                value: "-1".into(),
+            },
+            ParseError::InvalidValue {
+                option: "n".into(),
+                value: "0".into(),
+            },
+            ParseError::InvalidValue {
+                option: "log".into(),
+                value: "bad".into(),
+            },
+            ParseError::InvalidOutputDirectory("/missing".into()),
+            ParseError::InvalidCombination(
+                "-n is invalid when multiple memory thresholds are specified".into(),
+            ),
+            ParseError::InvalidCombination("-f requires the -e exception trigger".into()),
+            ParseError::InvalidCombination("-sr requires resource tracking".into()),
+            ParseError::InvalidCombination("-fx requires resource tracking".into()),
+            ParseError::InvalidCombination(
+                "the wait option requires the process be specified by name".into(),
+            ),
+            ParseError::InvalidCombination(
+                "signal and exception triggers must be the only trigger specified".into(),
+            ),
+            ParseError::InvalidCombination(
+                "the polling interval is invalid during signal or exception monitoring".into(),
+            ),
+            ParseError::InvalidCombination(
+                "a custom dump name is invalid when monitoring multiple processes".into(),
+            ),
+        ];
+        let actual = errors
+            .iter()
+            .map(|error| error.legacy_cli_message().unwrap())
+            .collect::<Vec<_>>();
+        let expected = include_str!("../../../tests/cli-compat/legacy-error-messages.txt")
+            .lines()
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            actual.iter().map(String::as_str).collect::<Vec<_>>(),
+            expected
+        );
     }
 
     #[test]
@@ -1140,6 +1659,51 @@ mod tests {
 
         assert!(config.timer_trigger);
         assert_eq!(config.threshold_seconds, DEFAULT_THRESHOLD_SECONDS);
+    }
+
+    #[test]
+    fn default_linux_corex_does_not_require_gcore_preflight() {
+        let config = parse_test(&["42"], Platform::Linux).unwrap();
+
+        assert_eq!(
+            config.requires_gcore_preflight(),
+            !cfg!(all(
+                target_os = "linux",
+                any(target_arch = "x86_64", target_arch = "aarch64")
+            ))
+        );
+    }
+
+    #[test]
+    fn explicit_gcore_requires_gcore_preflight() {
+        let config = parse_test(&["-usegcore", "42"], Platform::Linux).unwrap();
+
+        assert!(config.requires_gcore_preflight());
+    }
+
+    #[test]
+    fn macos_requires_gcore_preflight() {
+        let config = parse_test(&["42"], Platform::MacOs).unwrap();
+
+        assert!(config.requires_gcore_preflight());
+    }
+
+    #[cfg(feature = "dotnet-triggers")]
+    #[test]
+    fn managed_triggers_do_not_require_gcore_preflight() {
+        let exception = parse_test(&["-e", "42"], Platform::Linux).unwrap();
+        let counter = parse_test(&["-pc", "Provider:Counter", "1", "42"], Platform::Linux).unwrap();
+
+        assert!(!exception.requires_gcore_preflight());
+        assert!(!counter.requires_gcore_preflight());
+    }
+
+    #[cfg(feature = "restrack")]
+    #[test]
+    fn nodump_restrack_does_not_require_gcore_preflight() {
+        let config = parse_test(&["-restrack", "nodump", "42"], Platform::Linux).unwrap();
+
+        assert!(!config.requires_gcore_preflight());
     }
 
     #[cfg(feature = "dotnet-triggers")]

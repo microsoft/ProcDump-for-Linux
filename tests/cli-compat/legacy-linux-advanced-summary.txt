@@ -1,0 +1,17 @@
+Process:                                worker (42)
+CPU Threshold:                          >= 65%
+Commit Threshold:                       >= 100 MB,200 MB
+Thread Threshold:                       25
+File Descriptor Threshold:              100
+GC Generation:                          n/a
+Resource tracking:                      On
+Resource tracking sample rate:          10
+Signal:                                 n/a
+Exception monitor:                      n/a
+Perf Counter Trigger:                   Provider:Counter[p95] >= 1.25
+Exclude filter:                         malloc
+Polling Interval (ms):                  1000
+Threshold (s):                          10
+Number of Dumps:                        2
+Output directory:                       /tmp
+Custom name for core dumps:             dump.core_<counter>@EOL@

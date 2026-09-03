@@ -1,0 +1,9 @@
+Process:                                worker (42)
+CPU Threshold:                          n/a
+Commit Threshold:                       n/a
+Thread Threshold:                       n/a
+File Descriptor Threshold:              n/a
+Polling Interval (ms):                  1000
+Threshold (s):                          10
+Number of Dumps:                        1
+Output directory:                       .@EOL@

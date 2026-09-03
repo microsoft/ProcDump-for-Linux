@@ -81,7 +81,7 @@ impl DumpCoordinator {
         if let Some(path) = &dump_path {
             crate::diagnostics::info(
                 self.diagnostics,
-                format!("Core dump {dump_number} generated: {}", path.display()),
+                crate::cli_output::core_dump(dump_number, path),
             );
         }
         if dump_number + 1 >= self.limit {
@@ -99,10 +99,7 @@ impl DumpCoordinator {
             return false;
         }
         let dump_number = self.collected.fetch_add(1, Ordering::AcqRel);
-        crate::diagnostics::info(
-            self.diagnostics,
-            format!("Core dump {dump_number} generated: {}", path.display()),
-        );
+        crate::diagnostics::info(self.diagnostics, crate::cli_output::managed_core_dump(path));
         if dump_number + 1 >= self.limit {
             self.control.request_quit();
         }
@@ -308,7 +305,13 @@ impl MonitorSet {
             return Err(MonitorError::UnsupportedTrigger);
         }
         if config.timer_trigger {
-            startup.push(spawn_timer(Arc::clone(&control), coordinator, snooze)?);
+            startup.push(spawn_timer(
+                Arc::clone(&control),
+                coordinator,
+                identity,
+                config.polling_interval_ms / 1_000,
+                snooze,
+            )?);
         }
         if startup.threads.is_empty() {
             return Err(MonitorError::UnsupportedTrigger);
@@ -362,6 +365,8 @@ impl MonitorSet {
 fn spawn_timer(
     control: Arc<MonitorControl>,
     coordinator: Arc<DumpCoordinator>,
+    identity: ProcessIdentity,
+    polling_seconds: u64,
     snooze: Duration,
 ) -> Result<JoinHandle<Result<(), MonitorError>>, MonitorError> {
     thread::Builder::new()
@@ -371,6 +376,10 @@ fn spawn_timer(
                 return Ok(());
             }
             loop {
+                crate::diagnostics::info(
+                    coordinator.diagnostics,
+                    crate::cli_output::timer_trigger(polling_seconds, identity.pid.get()),
+                );
                 coordinator.write(DumpKind::Timer)?;
                 if coordinator.limit_reached() || control.wait(snooze) != WaitOutcome::TimedOut {
                     return Ok(());
@@ -401,10 +410,7 @@ fn spawn_cpu(
                 if threshold_matches(threshold, usage) {
                     crate::diagnostics::info(
                         coordinator.diagnostics,
-                        format!(
-                            "Trigger: CPU usage:{usage}% on process ID: {}",
-                            identity.pid.get()
-                        ),
+                        crate::cli_output::cpu_trigger(usage, identity.pid.get()),
                     );
                     coordinator.write(DumpKind::Cpu)?;
                     if coordinator.limit_reached() || control.wait(snooze) != WaitOutcome::TimedOut
@@ -449,10 +455,7 @@ fn spawn_memory(
                 if triggered {
                     crate::diagnostics::info(
                         coordinator.diagnostics,
-                        format!(
-                            "Trigger: Commit usage:{usage}MB on process ID: {}",
-                            identity.pid.get()
-                        ),
+                        crate::cli_output::commit_trigger(usage, identity.pid.get()),
                     );
                     coordinator.write(DumpKind::Commit)?;
                     current += 1;
@@ -491,7 +494,14 @@ where
             }
             while control.wait(polling) == WaitOutcome::TimedOut {
                 let snapshot = sample_identity(metrics.as_ref(), identity)?;
-                if value(&snapshot) >= threshold {
+                let current = value(&snapshot);
+                if current >= threshold {
+                    if kind == DumpKind::Thread {
+                        crate::diagnostics::info(
+                            coordinator.diagnostics,
+                            crate::cli_output::thread_trigger(current, identity.pid.get()),
+                        );
+                    }
                     coordinator.write(kind)?;
                     if coordinator.limit_reached() || control.wait(snooze) != WaitOutcome::TimedOut
                     {

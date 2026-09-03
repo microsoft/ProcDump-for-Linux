@@ -240,9 +240,12 @@ fn evaluate_counter(
             if triggered {
                 crate::diagnostics::info(
                     coordinator.diagnostics,
-                    format!(
-                        "Trigger: {}:{} value:{comparison:.4} threshold:{:.4} on process ID: {}",
-                        value.provider, value.counter, trigger.threshold, pid
+                    crate::cli_output::performance_counter_trigger(
+                        &value.provider,
+                        &value.counter,
+                        comparison,
+                        trigger.threshold,
+                        pid,
                     ),
                 );
                 coordinator

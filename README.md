@@ -67,6 +67,7 @@ Capture Usage:
             [-tc Thread_Threshold]
             [-fc FileDescriptor_Threshold]
             [-sig Signal_Number1[,Signal_Number2...]]
+            [-pc|-pcl Provider:Counter[pN] Threshold]
             [-e]
             [-f Include_Filter,...]
             [-fx Exclude_Filter]
@@ -92,6 +93,8 @@ Options:
    -tc     Thread count threshold above which to create a dump of the process.
    -fc     File descriptor count threshold above which to create a dump of the process.
    -sig    Comma separated list of signal number(s) during which any signal results in a dump of the process.
+   -pc     [.NET] Trigger when performance counter is at or exceeds the threshold. Format: provider_name:counter_name[pN] threshold. Supports both EventCounters and System.Diagnostics.Metrics. For histogram instruments, append [pN] to select a percentile (e.g., [p50], [p95], [p99]). Default is p50 if omitted.
+   -pcl    [.NET] Trigger when performance counter falls below the threshold. Format: provider_name:counter_name[pN] threshold.
    -e      [.NET] Create dump when the process encounters an exception.
    -f      Filter (include) on the content of .NET exceptions (comma separated). Wildcards (*) are supported.
    -fx     Filter (exclude) on the content of -restrack call stacks. Wildcards (*) are supported.
@@ -230,7 +233,7 @@ sudo procdump -w my_application
 
 ## Current Limitations
 * Currently will only run on Linux Kernels version 3.5+ or macOS Sierra+. 
-* Does not have full feature parity with Windows version of ProcDump, specifically, stay alive functionality, and custom performance counters
+* Does not have full feature parity with the Windows version of ProcDump, specifically stay-alive functionality.
 
 # Feedback
 * Ask a question on StackOverflow (tag with ProcDumpForLinux)

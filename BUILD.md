@@ -43,6 +43,18 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+The CLI compatibility tests preserve the final C/C++ command-line contract from
+the `legacy-cpp-final` tag. They compare deterministic output byte-for-byte and
+test dynamic output at fixed formatting boundaries:
+
+```bash
+cargo test -p procdump-cli legacy
+cargo test -p procdump --features full --lib legacy_character_for_character
+```
+
+The checked-in oracles and their maintenance rules are documented in
+`tests/cli-compat/README.md`.
+
 Release artifacts:
 
 ```bash
@@ -55,6 +67,30 @@ This produces:
 * `target/release/procdump`
 * `target/release/libprocdump.a`
 * Public C header: `crates/procdump-capi/include/ProcDumpLib.h`
+
+## Optional Linux packages
+
+The Cargo build can produce a host-native Debian or RPM package without changing
+the normal workspace build. Install `dpkg-deb` for Debian packages or `rpmbuild`
+for RPM packages, then run:
+
+```bash
+cargo xtask package-deb
+cargo xtask package-rpm
+```
+
+Package versions default to the workspace version with release `1`. Release
+builds can override either value:
+
+```bash
+cargo xtask package-deb --version 3.5.3 --release 2
+cargo xtask package-rpm --version 3.5.3 --release 2
+```
+
+The commands build `target/release/procdump` and invoke `makePackages.sh` to
+place the resulting package under `target/packages/`. Packages include the CLI,
+manual page, license, and third-party notices. Package generation is native-only;
+cross-architecture package creation is not currently supported.
 
 ## Rust API features
 

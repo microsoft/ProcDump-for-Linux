@@ -1,0 +1,35 @@
+
+ProcDump v@VERSION@ - Sysinternals process dump utility
+Copyright (C) 2025 Microsoft Corporation. All rights reserved. Licensed under the MIT license.
+Mark Russinovich, Mario Hewardt, John Salem, Javid Habibi
+Sysinternals - www.sysinternals.com
+
+Monitors one or more processes and writes a core dump file when the processes exceeds the
+specified criteria.
+
+
+Capture Usage: 
+   procdump [-n Count]
+            [-s Seconds]
+            [-c|-cl CPU_Usage]
+            [-m|-ml Commit_Usage1[,Commit_Usage2...]]
+            [-tc Thread_Threshold]
+            [-fc FileDescriptor_Threshold]
+            [-pf Polling_Frequency]
+            [-o]
+            [-log syslog|stdout]
+            {
+             {{[-w] Process_Name | PID} [Dump_File | Dump_Folder]}
+            }
+
+Options:
+   -n      Number of dumps to write before exiting.
+   -s      Consecutive seconds before dump is written (default is 10).
+   -c      CPU threshold above which to create a dump of the process.
+   -cl     CPU threshold below which to create a dump of the process.
+   -tc     Thread count threshold above which to create a dump of the process.
+   -fc     File descriptor count threshold above which to create a dump of the process.
+   -pf     Polling frequency.
+   -o      Overwrite existing dump file.
+   -log    Writes extended ProcDump tracing to the specified output stream (syslog or stdout).
+@OPTION_INDENT@-w      Wait for the specified process to launch if it's not running.@EOL@

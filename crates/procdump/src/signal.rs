@@ -72,7 +72,7 @@ fn monitor_signals(
             attachment.detach(libc::SIGSTOP)?;
             crate::diagnostics::info(
                 coordinator.diagnostics,
-                format!("Trigger: Signal:{signal} on process ID: {pid}"),
+                crate::cli_output::signal_trigger(signal, pid),
             );
             let dump_result = coordinator
                 .write(DumpKind::Signal)

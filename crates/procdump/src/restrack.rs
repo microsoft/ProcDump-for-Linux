@@ -85,10 +85,7 @@ impl DumpSidecar for RestrackReporter {
             self.incomplete.load(Ordering::Acquire),
         )
         .map_err(MonitorError::Restrack)?;
-        crate::diagnostics::info(
-            self.diagnostics,
-            format!("Leak report generated: {}", path.display()),
-        );
+        crate::diagnostics::info(self.diagnostics, crate::cli_output::leak_report(&path));
         Ok(path)
     }
 }
@@ -275,11 +272,14 @@ fn spawn_manual_trigger(
             if control.wait_for_start() == WaitOutcome::Quit {
                 return Ok(());
             }
-            println!("Press 't' to trigger a Restrack snapshot (or any other key to exit)...");
+            crate::diagnostics::info(reporter.diagnostics, crate::cli_output::RESTRACK_PROMPT);
             let result = match wait_for_manual_input(&control) {
                 Ok(None) => Ok(()),
                 Ok(Some(input)) if input.eq_ignore_ascii_case(&b't') => {
-                    println!("Triggering Restrack snapshot...");
+                    crate::diagnostics::info(
+                        reporter.diagnostics,
+                        crate::cli_output::RESTRACK_TRIGGERED,
+                    );
                     reporter.write(DumpKind::Manual, None).map(|_| ())
                 }
                 Ok(Some(_)) => Ok(()),

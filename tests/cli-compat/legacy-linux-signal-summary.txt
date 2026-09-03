@@ -1,0 +1,16 @@
+** NOTE ** Signal triggers use PTRACE which will impact the performance of the target process
+
+Process:                                worker (42)
+CPU Threshold:                          n/a
+Commit Threshold:                       n/a
+Thread Threshold:                       n/a
+File Descriptor Threshold:              n/a
+GC Generation:                          n/a
+Resource tracking:                      n/a
+Resource tracking sample rate:          n/a
+Signal(s):                              10,12
+Exception monitor:                      n/a
+Polling Interval (ms):                  1000
+Threshold (s):                          10
+Number of Dumps:                        1
+Output directory:                       /tmp@EOL@

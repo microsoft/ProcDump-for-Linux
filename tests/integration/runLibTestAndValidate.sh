@@ -39,6 +39,8 @@ function runLibTestAndValidate {
 	DRIVERPATH="${DRIVERPATH:-$DIR/../../ProcDumpLibTestDriver}";
 	TESTPROGPATH=$(readlink -m "$DIR/../../ProcDumpTestApplication");
 	GDBSCRIPT="$DIR/validate_dump.gdb"
+	gcoreRefDir=""
+	trap 'if [ -n "$gcoreRefDir" ]; then rm -rf "$gcoreRefDir"; fi' EXIT
 
 	# Defaults
 	LIBTEST_PID="${LIBTEST_PID:-target}"

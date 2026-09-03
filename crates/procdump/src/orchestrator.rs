@@ -26,27 +26,27 @@ where
     let mut active = HashMap::new();
     let mut monitored = HashMap::new();
 
+    match &mode {
+        MonitorMode::WaitForName(name) => crate::diagnostics::info(
+            config.diagnostics,
+            crate::cli_output::waiting_for_processes(&name.to_string_lossy()),
+        ),
+        MonitorMode::ProcessGroup(group) => crate::diagnostics::info(
+            config.diagnostics,
+            crate::cli_output::monitoring_process_group(*group),
+        ),
+        MonitorMode::Pid(_) | MonitorMode::SingleName(_) => {}
+    }
+    crate::diagnostics::info(config.diagnostics, crate::cli_output::PRESS_CTRL_C);
+
     let initial = match &mode {
         MonitorMode::Pid(pid) => vec![processes.sample(*pid)?],
         MonitorMode::SingleName(name) => vec![
             newest_named_process(processes.as_ref(), name, false)?
                 .ok_or_else(|| ProcessError::NameNotFound(name.clone()))?,
         ],
-        MonitorMode::WaitForName(name) => {
-            crate::diagnostics::info(
-                config.diagnostics,
-                format!(
-                    "Waiting for processes '{}' to launch",
-                    name.to_string_lossy()
-                ),
-            );
-            discover_named_processes(processes.as_ref(), name, true)?
-        }
+        MonitorMode::WaitForName(name) => discover_named_processes(processes.as_ref(), name, true)?,
         MonitorMode::ProcessGroup(group) => {
-            crate::diagnostics::info(
-                config.diagnostics,
-                format!("Monitoring processes of PGID '{group}'"),
-            );
             let matches = discover_group_processes(processes.as_ref(), *group)?;
             if matches.is_empty() {
                 return Err(ProcessError::GroupNotFound(*group).into());
@@ -54,6 +54,10 @@ where
             matches
         }
     };
+    let summary_process = initial
+        .first()
+        .map(|process| (process.name.as_os_str(), process.identity.pid.get()));
+    print!("{}", config.legacy_summary(platform, summary_process));
     start_new_monitors(
         config,
         platform,
@@ -128,6 +132,8 @@ impl MonitorMode {
 
 struct ActiveMonitor {
     identity: ProcessIdentity,
+    name: OsString,
+    multiple: bool,
     monitor: MonitorSet,
 }
 
@@ -145,6 +151,7 @@ where
 {
     for snapshot in discovered {
         let identity = snapshot.identity;
+        let name = snapshot.name.clone();
         if active
             .get(&identity.pid)
             .is_some_and(|session| session.identity == identity)
@@ -155,18 +162,25 @@ where
         if let Some(previous) = active.remove(&identity.pid) {
             finish_session(processes.as_ref(), previous)?;
         }
-        crate::diagnostics::info(
-            config.diagnostics,
-            format!(
-                "Starting monitor for process {} ({})",
-                snapshot.name.to_string_lossy(),
-                identity.pid.get()
-            ),
-        );
         let metrics: Arc<dyn ProcessMetrics> = processes.clone();
         let monitor = MonitorSet::start(config, platform, snapshot, metrics, Arc::clone(backend))?;
+        crate::diagnostics::info(
+            config.diagnostics,
+            crate::cli_output::starting_monitor(&name.to_string_lossy(), identity.pid.get()),
+        );
         monitored.insert(identity.pid, identity);
-        active.insert(identity.pid, ActiveMonitor { identity, monitor });
+        active.insert(
+            identity.pid,
+            ActiveMonitor {
+                identity,
+                name,
+                multiple: matches!(
+                    config.target,
+                    TargetSpec::Name(_) if config.wait_for_process
+                ) || matches!(config.target, TargetSpec::ProcessGroup(_)),
+                monitor,
+            },
+        );
     }
     Ok(())
 }
@@ -206,15 +220,34 @@ where
         Err(ProcessError::Disappeared(_)) => false,
         Err(error) => return Err(error.into()),
     };
+    if session.multiple {
+        crate::diagnostics::info(
+            crate::config::DiagnosticsTarget::None,
+            crate::cli_output::stopping_monitors(
+                &session.name.to_string_lossy(),
+                session.identity.pid.get(),
+            ),
+        );
+    }
     session.monitor.request_quit();
-    match session.monitor.wait() {
+    let result = match session.monitor.wait() {
         Ok(()) => Ok(()),
         Err(MonitorError::Process(ProcessError::Disappeared(_)) | MonitorError::PidReused(_)) => {
             Ok(())
         }
         Err(_) if !alive => Ok(()),
         Err(error) => Err(error.into()),
+    };
+    if !session.multiple {
+        crate::diagnostics::info(
+            crate::config::DiagnosticsTarget::None,
+            crate::cli_output::stopping_monitor(
+                &session.name.to_string_lossy(),
+                session.identity.pid.get(),
+            ),
+        );
     }
+    result
 }
 
 fn newest_named_process<P>(
