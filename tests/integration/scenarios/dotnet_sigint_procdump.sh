@@ -15,7 +15,7 @@ dotnet run --urls=http://localhost:5032&
 waitforurl http://localhost:5032/throwinvalidoperation
 if [ $? -eq -1 ]; then
     pkill -9 TestWebApi
-    popds
+    popd
     exit 1
 fi
 

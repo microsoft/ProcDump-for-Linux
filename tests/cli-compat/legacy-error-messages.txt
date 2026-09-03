@@ -1,0 +1,22 @@
+Invalid CPU threshold count specified.
+Invalid memory threshold specified.
+Invalid GC generation or heap specified.
+Invalid GC generation specified.
+Invalid sample rate specified.
+Invalid signal specified.
+Invalid core dump mask specified.
+Invalid thread threshold count specified.
+Invalid file descriptor threshold count specified.
+Invalid polling inverval specified.
+Invalid seconds specified.
+Invalid number of dumps specified.
+Invalid diagnostics stream specified.
+Invalid directory ("/missing") provided for core dump output.
+When specifying more than one memory threshold the number of dumps switch (-n) is invalid.
+Please use the -e switch when specifying an exception filter (-f)
+Please use the -restrack switch when specifying a sample rate (-samplerate)
+Please use the -restrack switch when specifying an exclude filter (-fx)
+The wait option requires the process be specified by name.
+Signal/Exception trigger must be the only trigger specified.
+Polling interval has no meaning during Signal/Exception monitoring.
+Setting core dump name in multi process monitoring is invalid (path is ok).

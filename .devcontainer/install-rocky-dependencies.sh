@@ -7,6 +7,8 @@ yum install git \
     gdb \
     python3 \
     zlib-devel \
+    gcc-c++ \
+    pkg-config \
     gcc-toolset-10 \
     rpm-build \
     make \
@@ -18,7 +20,6 @@ yum install git \
     wget \
     clang \
     redhat-lsb \
-    cmake \
     elfutils-libelf-devel \
     libbpf-devel \
     bpftool
@@ -28,3 +29,6 @@ pip3 uninstall -y pip
 curl https://stedolan.github.io/jq/download/linux64/jq > /usr/bin/jq && chmod +x /usr/bin/jq
 yum install dotnet-runtime-6.0
 yum install dotnet-sdk-6.0
+
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+/root/.cargo/bin/rustup component add rustfmt clippy

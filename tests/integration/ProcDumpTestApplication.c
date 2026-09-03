@@ -87,6 +87,13 @@ void* ThreadProc(void *input)
 // For targets >= 95%, runs a pure busy loop (100% of one core).
 // For lower targets, alternates between busy and sleep periods using 1-second cycles.
 static volatile unsigned long cpu_burn_sink;
+static volatile sig_atomic_t signal_count;
+
+static void handle_test_signal(int signal_number)
+{
+    (void)signal_number;
+    signal_count++;
+}
 
 void stress_cpu(int target_cpu_percentage) {
     long cycle_usec = 1000000L;
@@ -202,6 +209,21 @@ int main(int argc, char *argv[])
         {
             while(1);
         }
+        else if (strcmp("signal", argv[1]) == 0)
+        {
+            struct sigaction action = {0};
+            action.sa_handler = handle_test_signal;
+            sigemptyset(&action.sa_mask);
+            if (sigaction(SIGUSR1, &action, NULL) != 0)
+            {
+                perror("sigaction");
+                exit(1);
+            }
+            while (1)
+            {
+                pause();
+            }
+        }
         else if (strcmp("fc", argv[1]) == 0)
         {
           FILE* fd[FILE_DESC_COUNT];
@@ -234,6 +256,8 @@ int main(int argc, char *argv[])
                     a(2);
                     a(3);
                 }
+                printf("Restrack allocations complete\n");
+                fflush(stdout);
             }
             else
             {
@@ -260,6 +284,28 @@ int main(int argc, char *argv[])
                 stress_memory((size_t)(value * multiplier));
             }
 
+            sleep(UINT_MAX);
+        }
+        else if (strcmp("restrack_edges", argv[1]) == 0)
+        {
+#ifdef __linux__
+            sleep(10);
+            void* allocation = malloc(10000);
+            allocation = realloc(allocation, 20000);
+            memset(allocation, 'r', 20000);
+            mlock(allocation, 20000);
+
+            (void)mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, -1, 0);
+            void* mapping = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
+                                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (mapping != MAP_FAILED)
+            {
+                (void)munmap((char*)mapping + 1, 4096);
+                (void)munmap(mapping, 4096);
+            }
+            printf("Restrack edge allocations complete\n");
+            fflush(stdout);
+#endif
             sleep(UINT_MAX);
         }
         else if (strcmp("cpu", argv[1]) == 0)

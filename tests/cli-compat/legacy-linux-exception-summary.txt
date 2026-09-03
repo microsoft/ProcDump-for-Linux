@@ -1,0 +1,15 @@
+Process Name:                           worker
+CPU Threshold:                          n/a
+Commit Threshold:                       n/a
+Thread Threshold:                       n/a
+File Descriptor Threshold:              n/a
+GC Generation:                          n/a
+Resource tracking:                      n/a
+Resource tracking sample rate:          n/a
+Signal:                                 n/a
+Exception monitor:                      On
+Exception filter:                       System.Exception
+Polling Interval (ms):                  1000
+Threshold (s):                          10
+Number of Dumps:                        1
+Output directory:                       /tmp@EOL@

@@ -1,5 +1,7 @@
 FROM mcr.microsoft.com/cbl-mariner/base/core:2.0
 
+ENV PATH="/root/.cargo/bin:${PATH}"
+
 # Install dependencies
 COPY install-azurelinux-dependencies.sh /usr/local/bin/install_dependencies.sh
 RUN chmod +x /usr/local/bin/install_dependencies.sh && \

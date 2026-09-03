@@ -1,0 +1,17 @@
+Press Ctrl-C to end monitoring without terminating the process(es).
+Waiting for processes 'worker' to launch\n
+Monitoring processes of PGID '42'\n
+Starting monitor for process worker (1234)
+Stopping monitor for process worker (1234)
+Stopping monitors for process: worker (1234)
+Core dump 0 generated: /tmp/core.1234
+Core dump generated: /tmp/core.1234
+Trigger: Commit usage:100MB on process ID: 1234
+Trigger: Thread count:25 on process ID: 1234
+Trigger: Signal:12 on process ID: 1234
+Trigger: CPU usage:65% on process ID: 1234
+Trigger: Timer:1(s) on process ID: 1234
+Trigger: Provider:Counter value:1.2500 threshold:1.0000 on process ID: 1234
+Leak report generated: /tmp/core.1234.restrack
+Press 't' to trigger a Restrack snapshot (or any other key to exit)...
+Triggering Restrack snapshot...

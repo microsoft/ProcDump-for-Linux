@@ -1,0 +1,17 @@
+[package]
+name = "procdump-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "procdump"
+path = "src/main.rs"
+
+[dependencies]
+procdump = { path = "../procdump", features = ["full"] }
+signal-hook.workspace = true
+
+[lints]
+workspace = true

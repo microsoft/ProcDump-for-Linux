@@ -5,6 +5,8 @@ function runProcDumpAndValidate {
 	DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )";
 	PROCDUMPPATH="${PROCDUMPPATH:-$DIR/../../procdump}";
 	GDBSCRIPT="$DIR/validate_dump.gdb"
+	gcoreRefDir=""
+	trap 'if [ -n "$gcoreRefDir" ]; then rm -rf "$gcoreRefDir"; fi' EXIT
 
 	OS=$(uname -s)
 

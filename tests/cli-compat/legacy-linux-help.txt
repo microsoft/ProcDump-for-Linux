@@ -1,0 +1,61 @@
+
+ProcDump v@VERSION@ - Sysinternals process dump utility
+Copyright (C) 2025 Microsoft Corporation. All rights reserved. Licensed under the MIT license.
+Mark Russinovich, Mario Hewardt, John Salem, Javid Habibi
+Sysinternals - www.sysinternals.com
+
+Monitors one or more processes and writes a core dump file when the processes exceeds the
+specified criteria.
+
+
+Capture Usage: 
+   procdump [-n Count]
+            [-s Seconds]
+            [-c|-cl CPU_Usage]
+            [-m|-ml Commit_Usage1[,Commit_Usage2...]]
+            [-tc Thread_Threshold]
+            [-fc FileDescriptor_Threshold]
+            [-gcm [<GCGeneration>: | LOH: | POH:]Memory_Usage1[,Memory_Usage2...]]
+            [-gcgen Generation]
+            [-restrack [nodump]]
+            [-sr Sample_Rate]
+            [-sig Signal_Number1[,Signal_Number2...]]
+            [-pc|-pcl Provider:Counter[pN] Threshold]
+            [-e]
+            [-f Include_Filter,...]
+            [-fx Exclude_Filter]
+            [-mc Custom_Dump_Mask]
+            [-pf Polling_Frequency]
+            [-o]
+            [-log syslog|stdout]
+            {
+             {{[-w] Process_Name | [-pgid] PID} [Dump_File | Dump_Folder]}
+            }
+
+Options:
+   -n      Number of dumps to write before exiting.
+   -s      Consecutive seconds before dump is written (default is 10).
+   -c      CPU threshold above which to create a dump of the process.
+   -cl     CPU threshold below which to create a dump of the process.
+   -tc     Thread count threshold above which to create a dump of the process.
+   -fc     File descriptor count threshold above which to create a dump of the process.
+   -m      Memory commit threshold(s) (MB) above which to create dumps.
+   -ml     Memory commit threshold(s) (MB) below which to create dumps.
+   -gcm    [.NET] GC memory threshold(s) (MB) above which to create dumps for the specified generation or heap (default is total .NET memory usage).
+   -gcgen  [.NET] Create dump when the garbage collection of the specified generation starts and finishes.
+   -restrack Enable memory leak tracking (malloc family of APIs). If used without other triggers, use 't' to manually capture a restrack report. When used with other triggers, the 'nodump' option can be used to prevent dump generation and only produce restrack report(s).
+   -sr     Sample rate when using -restrack.
+   -sig    Comma separated list of signal number(s) during which any signal results in a dump of the process.
+   -pc     [.NET] Trigger when performance counter is at or exceeds the threshold. Format: provider_name:counter_name[pN] threshold.
+           Supports both EventCounters and System.Diagnostics.Metrics. For histogram instruments, append [pN] to select
+           a percentile (e.g., [p50], [p95], [p99]). Default is p50 if omitted.
+   -pcl    [.NET] Trigger when performance counter falls below the threshold. Format: provider_name:counter_name[pN] threshold.
+   -e      [.NET] Create dump when the process encounters an exception.
+   -f      Filter (include) on the content of .NET exceptions (comma separated). Wildcards (*) are supported.
+   -fx     Filter (exclude) on the content of -restrack call stacks. Wildcards (*) are supported.
+   -mc     Custom core dump mask (in hex) indicating what memory should be included in the core dump. Please see 'man core' (/proc/[pid]/coredump_filter) for available options.
+   -pgid   Process ID specified refers to a process group ID.
+   -pf     Polling frequency.
+   -o      Overwrite existing dump file.
+   -log    Writes extended ProcDump tracing to the specified output stream (syslog or stdout).
+@OPTION_INDENT@-w      Wait for the specified process to launch if it's not running.@EOL@

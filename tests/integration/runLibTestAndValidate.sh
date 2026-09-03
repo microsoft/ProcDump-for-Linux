@@ -39,6 +39,8 @@ function runLibTestAndValidate {
 	DRIVERPATH="${DRIVERPATH:-$DIR/../../ProcDumpLibTestDriver}";
 	TESTPROGPATH=$(readlink -m "$DIR/../../ProcDumpTestApplication");
 	GDBSCRIPT="$DIR/validate_dump.gdb"
+	gcoreRefDir=""
+	trap 'if [ -n "$gcoreRefDir" ]; then rm -rf "$gcoreRefDir"; fi' EXIT
 
 	# Defaults
 	LIBTEST_PID="${LIBTEST_PID:-target}"
@@ -120,10 +122,18 @@ function runLibTestAndValidate {
 	fi
 
 	# Run the driver.
+	maskBefore=""
+	if [ "$LIBTEST_MASK" != "default" ] && [ -n "$targetPid" ] && [ -r "/proc/$targetPid/coredump_filter" ]; then
+		maskBefore=$(cat "/proc/$targetPid/coredump_filter")
+	fi
 	echo [`date +"%T.%3N"`] Running: "$DRIVERPATH" "$pidArg" "$pathArg" "$LIBTEST_MASK" "$LIBTEST_OVERWRITE" "$LIBTEST_STACK_SIZE"
 	"$DRIVERPATH" "$pidArg" "$pathArg" "$LIBTEST_MASK" "$LIBTEST_OVERWRITE" "$LIBTEST_STACK_SIZE"
 	rc=$?
 	echo "[libtest] driver exit code: $rc"
+	maskAfter=""
+	if [ -n "$maskBefore" ] && [ -r "/proc/$targetPid/coredump_filter" ]; then
+		maskAfter=$(cat "/proc/$targetPid/coredump_filter")
+	fi
 
 	# Stop the target process.
 	if [ -n "$targetPid" ] && ps -p "$targetPid" > /dev/null 2>&1; then
@@ -131,6 +141,10 @@ function runLibTestAndValidate {
 	fi
 
 	result=0
+	if [ -n "$maskBefore" ] && [ "$maskBefore" != "$maskAfter" ]; then
+		echo "[libtest] FAIL: coredump_filter was not restored ($maskBefore -> $maskAfter)"
+		result=1
+	fi
 
 	# 1. Validate the return code against expectation.
 	if [ "$EXPECTSUCCESS" = "true" ]; then

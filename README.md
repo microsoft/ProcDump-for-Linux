@@ -1,23 +1,55 @@
-# ProcDump [![Build Status](https://dev.azure.com/sysinternals/Tools/_apis/build/status/Sysinternals.ProcDump-for-Linux?branchName=master)](https://dev.azure.com/sysinternals/Tools/_build/latest?definitionId=341&branchName=master)
-ProcDump is a Linux and Mac reimagining of the classic ProcDump tool from the Sysinternals suite of tools for Windows.  ProcDump provides a convenient way for Linux and Mac developers to create core dumps of their application based on performance triggers. ProcDump for Linux and Mac is part of [Sysinternals](https://sysinternals.com).
+# ProcDump
+
+ProcDump is a Linux and macOS reimagining of the classic ProcDump tool from the
+Sysinternals suite for Windows. It creates process dumps in response to
+performance, runtime, signal, and resource-tracking triggers.
+
+The supported implementation is the Cargo workspace in this repository. Linux
+and macOS process access sit behind shared Rust interfaces. Linux native dumps
+use the Rust corex ELF writer by default; managed dumps use .NET diagnostics
+IPC; macOS and the explicit Linux `-usegcore` fallback use `gcore`.
+
+The Linux eBPF kernel program and injected CLR profiler remain native
+components under `crates/procdump/native/`, built and embedded by Cargo. Their userspace
+loading, monitoring, EventPipe handling, orchestration, reporting, and dump
+writing are Rust.
 
 ![ProcDump in use](procdump.gif "Procdump in use")
 
 # Installation & Usage
 
 ## Requirements
-* Minimum Linux OS:
-  * Red Hat Enterprise Linux / CentOS 7
-  * Fedora 29
-  * Ubuntu 16.04 LTS
-  * `gdb` >= 7.6.1
-* Minimum Mac OS: Sierra
+* Rust stable with `rustfmt` and `clippy`
+* Linux: Clang, `pkg-config`, libelf/zlib development packages, `gdb`, and
+   `gcore`
+* macOS: Xcode command-line tools, `gdb`, and `gcore`
+* .NET SDK/runtime when running managed integration scenarios
  
 ## Install ProcDump
 Please see installation instructions [here](INSTALL.md).
 
 ## Build
 Please see build instructions [here](BUILD.md).
+
+```bash
+cargo build --workspace
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+## Repository layout
+
+* `crates/procdump`: safe Rust API and shared dump/monitoring implementation
+* `crates/procdump-cli`: command-line application
+* `crates/procdump-capi`: static C ABI and public header
+* `crates/procdump/native/ebpf`: optional Linux eBPF kernel program
+* `crates/procdump/native/profiler`: optional injected CLR profiler
+* `tests/integration`: unchanged compatibility scenarios and native test fixtures
+* `xtask`: Cargo staging and integration-test runner
+
+The `procdump` crate's default feature set supports immediate dump generation;
+monitoring, .NET triggers, and restrack are additive features, while the CLI
+enables `full`.
 
 ## Usage
 **BREAKING CHANGE** With the release of ProcDump 1.3 the switches are now aligned with the Windows ProcDump version.
@@ -35,6 +67,7 @@ Capture Usage:
             [-tc Thread_Threshold]
             [-fc FileDescriptor_Threshold]
             [-sig Signal_Number1[,Signal_Number2...]]
+            [-pc|-pcl Provider:Counter[pN] Threshold]
             [-e]
             [-f Include_Filter,...]
             [-fx Exclude_Filter]
@@ -60,6 +93,8 @@ Options:
    -tc     Thread count threshold above which to create a dump of the process.
    -fc     File descriptor count threshold above which to create a dump of the process.
    -sig    Comma separated list of signal number(s) during which any signal results in a dump of the process.
+   -pc     [.NET] Trigger when performance counter is at or exceeds the threshold. Format: provider_name:counter_name[pN] threshold. Supports both EventCounters and System.Diagnostics.Metrics. For histogram instruments, append [pN] to select a percentile (e.g., [p50], [p95], [p99]). Default is p50 if omitted.
+   -pcl    [.NET] Trigger when performance counter falls below the threshold. Format: provider_name:counter_name[pN] threshold.
    -e      [.NET] Create dump when the process encounters an exception.
    -f      Filter (include) on the content of .NET exceptions (comma separated). Wildcards (*) are supported.
    -fx     Filter (exclude) on the content of -restrack call stacks. Wildcards (*) are supported.
@@ -198,7 +233,7 @@ sudo procdump -w my_application
 
 ## Current Limitations
 * Currently will only run on Linux Kernels version 3.5+ or macOS Sierra+. 
-* Does not have full feature parity with Windows version of ProcDump, specifically, stay alive functionality, and custom performance counters
+* Does not have full feature parity with the Windows version of ProcDump, specifically stay-alive functionality.
 
 # Feedback
 * Ask a question on StackOverflow (tag with ProcDumpForLinux)
