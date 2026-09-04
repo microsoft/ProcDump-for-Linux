@@ -1,5 +1,2 @@
 [alias]
 xtask = "run -p xtask --"
-
-[registries]
-Tools_PublicPackages = { index = "sparse+https://pkgs.dev.azure.com/sysinternals/_packaging/Tools_PublicPackages/Cargo/index/" }
