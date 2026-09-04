@@ -1,3 +1,6 @@
+[source.crates-io]
+replace-with = "Tools_PublicPackages"
+
 [alias]
 xtask = "run -p xtask --"
 
