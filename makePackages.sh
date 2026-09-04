@@ -14,6 +14,8 @@ PACKAGE_RELEASE=$5
 PACKAGE_TYPE=$6
 ARCHITECTURE=$7
 
+TARGET_DIR=$(cd "$TARGET_DIR" && pwd)
+
 case "$PACKAGE_NAME" in
     ''|*[!a-z0-9+.-]*) echo "Invalid package name: $PACKAGE_NAME" >&2; exit 2 ;;
 esac
